@@ -27,6 +27,16 @@ STARRY_PALETTE = {
  'warning_text':'#f3c98a','match_bg':'#3d617b',
 }
 
+# Orbit uses the uploaded page's blue-black glass and pale primary action.
+STARRY_PALETTE.update({
+ 'sidebar':'#0a1120','page_bg':'#08101e','text':'#f5f7ff','muted':'#a6b4cc',
+ 'primary_bg':'#ece8fa','primary_hover':'#ffffff','accent':'#c4b5fd',
+ 'addfile_bg':'#ece8fa','addfile_hover':'#ffffff','nav_active':'#263043',
+ 'header_bg':'#111c2e','selection_bg':'#293447','border':'#2b3447',
+ 'chip_bg':'#222c3a','chip_text':'#d5dceb','scrollbar':'#3f4b62',
+ 'table_selected_muted':'#b7c3d8','brand_mark_bg':'#1d2940',
+ 'statusbar_bg':'#08101e','statusbar_text':'#8d9bb4'})
+
 STARRY_QSS = '''
 QMainWindow, QDialog { background:#0b1521; }
 QFrame#sidebar, QFrame#sidebarFooter, QFrame#list, QFrame#workflowBand, QFrame#actionbar {
@@ -91,6 +101,7 @@ class StarfieldBackground(QWidget):
     def __init__(self):
         super().__init__()
         self.starry = False
+        self.theme_name = 'ocean'
         self.background = '#070e19'
         self.reading_page = False
         self.sky = QImage()
@@ -104,6 +115,8 @@ class StarfieldBackground(QWidget):
         self.timer.timeout.connect(self.update)
 
     def set_theme(self, name, background):
+        if name!=self.theme_name:self.cache_size=QSize()
+        self.theme_name=name
         self.starry = name == 'starry'
         self.background = background
         if self.starry and self.isVisible() and not self.reading_page:
@@ -116,7 +129,7 @@ class StarfieldBackground(QWidget):
 
     def set_page(self, index):
         self.reading_page = index == 1
-        self.set_theme('starry' if self.starry else '', self.background)
+        self.set_theme(self.theme_name, self.background)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -134,35 +147,11 @@ class StarfieldBackground(QWidget):
         width, height = max(1,self.width()), max(1,self.height())
         self.sky = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
         self.sky.fill(QColor('#070e19'))
-        p = QPainter(self.sky)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        base = QLinearGradient(0, 0, width, height)
-        base.setColorAt(0, QColor('#07121e'))
-        base.setColorAt(.55, QColor('#122b40'))
-        base.setColorAt(1, QColor('#050c16'))
-        p.fillRect(self.sky.rect(), base)
-        # A diagonal, layered blue/cyan nebula, deterministic across launches.
-        rng = random.Random(925)
-        for _ in range(46):
-            x = rng.uniform(.12, 1.10)
-            y = .94 - x*.75 + rng.uniform(-.19,.19)
-            radius = rng.uniform(.09,.27)*width
-            cloud = QRadialGradient(QPointF(x*width,y*height),radius)
-            color = QColor(*rng.choice([(52,113,151),(39,91,136),(59,126,148),(94,136,158)]),rng.randint(12,35))
-            cloud.setColorAt(0,color)
-            cloud.setColorAt(.45,QColor(color.red(),color.green(),color.blue(),color.alpha()//2))
-            cloud.setColorAt(1,QColor(color.red(),color.green(),color.blue(),0))
-            p.fillRect(self.sky.rect(),cloud)
-        p.setPen(Qt.PenStyle.NoPen)
-        for x,y,r,brightness in self.stars:
-            point = QPointF(x*width,y*height)
-            alpha = int(65+brightness*150)
-            if brightness > .92:
-                p.setBrush(QColor(151,210,246,28))
-                p.drawEllipse(point,r*4,r*4)
-            p.setBrush(QColor(212,234,250,alpha))
-            p.drawEllipse(point,r,r)
-        p.end()
+        from .orbit_art import draw_orbit_sky
+        if self.starry:draw_orbit_sky(self.sky,self.stars)
+        else:
+            from .theme_variants import draw_light_sky
+            draw_light_sky(self.sky,self.theme_name)
         # Downsample + smooth upsample is a cached spatial low-pass of the real
         # sky, rather than an alpha-only imitation or a blur on foreground text.
         small = self.sky.scaled(max(1,width//24),max(1,height//24),Qt.AspectRatioMode.IgnoreAspectRatio,Qt.TransformationMode.SmoothTransformation)
@@ -170,12 +159,9 @@ class StarfieldBackground(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        if not self.starry:
-            p.fillRect(self.rect(),QColor(self.background))
-            return
         self.ensure_sky()
         p.drawImage(0,0,self.sky)
-        if not self.reading_page:
+        if self.starry and not self.reading_page:
             t = time.monotonic()-self.epoch
             p.setPen(Qt.PenStyle.NoPen)
             for x,y,r,phase in self.stars[::27]:
@@ -195,7 +181,7 @@ def paint_glass(widget):
     root = widget.parentWidget()
     while root is not None and not isinstance(root,StarfieldBackground):
         root = root.parentWidget()
-    if root is None or not root.starry:
+    if root is None:
         return False
     root.ensure_sky()
     p = QPainter(widget)
@@ -205,12 +191,32 @@ def paint_glass(widget):
     shape.addRoundedRect(QRectF(widget.rect()),radius,radius)
     p.setClipPath(shape)
     origin = widget.mapTo(root,QPoint(0,0))
-    p.drawImage(QRectF(widget.rect()),root.frost,QRectF(origin.x(),origin.y(),widget.width(),widget.height()))
-    p.fillRect(widget.rect(),QColor(15,29,43,128 if widget.objectName() == 'sidebar' else 112))
+    # The sidebar is a continuous part of the same sky, without a separate dark wash.
+    if widget.objectName() == 'sidebar':
+        p.drawImage(QRectF(widget.rect()),root.sky,QRectF(origin.x(),origin.y(),widget.width(),widget.height()))
+        p.end()
+        return True
+    if not root.starry:
+        p.drawImage(QRectF(widget.rect()),root.frost,QRectF(origin.x(),origin.y(),widget.width(),widget.height()))
+        p.fillRect(widget.rect(),QColor(255,255,255,130 if widget.objectName()=='list' else 80))
+        from .theme import get_colors
+        colors=get_colors()
+        active=widget.objectName()=='fileCard' and widget.property('active')
+        if active:
+            tint=QColor(colors['accent_light']);tint.setAlpha(135);p.fillRect(widget.rect(),tint)
+        border=QColor(colors['accent'] if active else colors['border']);border.setAlpha(220 if active else 190)
+        p.setBrush(Qt.BrushStyle.NoBrush);p.setPen(QPen(border,1))
+        p.drawRoundedRect(QRectF(widget.rect()).adjusted(.5,.5,-.5,-.5),radius,radius)
+        p.end();return True
+    p.drawImage(QRectF(widget.rect()),root.sky if widget.objectName()=='list' else root.frost,QRectF(origin.x(),origin.y(),widget.width(),widget.height()))
+    p.fillRect(widget.rect(),QColor(8,15,28,116))
     shine = QLinearGradient(0,0,0,min(130,widget.height()))
-    shine.setColorAt(0,QColor(215,238,255,15))
+    shine.setColorAt(0,QColor(215,238,255,8))
     shine.setColorAt(1,QColor(215,238,255,0))
     p.fillRect(widget.rect(),shine)
+    if widget.objectName() in ('actionbar','sidebarFooter'):
+        p.setBrush(Qt.BrushStyle.NoBrush);p.setPen(QPen(QColor(225,234,255,35),1))
+        p.drawRoundedRect(QRectF(widget.rect()).adjusted(.5,.5,-.5,-.5),radius,radius)
     if widget.objectName() == 'fileCard':
         if widget.property('active'):
             p.fillRect(widget.rect(),QColor(113,187,233,28))
@@ -221,3 +227,25 @@ def paint_glass(widget):
             p.fillRect(widget.rect(),QColor(190,220,244,12))
     p.end()
     return True
+
+STARRY_QSS += """
+QLabel#pageTitle { font-family:"Noto Serif SC","SimSun"; font-size:28px; font-weight:600; color:#f5f7ff; }
+QFrame#topbar[library="true"] QLabel#pageTitle { font-size:28px; }
+QLabel#subtitle, QLabel#muted { color:#a6b4cc; }
+QPushButton { color:#dce2f1; border:1px solid rgba(255,255,255,25); background:rgba(255,255,255,10); border-radius:8px; }
+QPushButton:checked { background:rgba(236,232,250,32); }
+QPushButton#nav { text-align:left; font-size:13px; color:#a6b4cc; }
+QPushButton#nav:checked { color:#f5f7ff; border:1px solid rgba(236,232,250,56); background:rgba(236,232,250,23); }
+QPushButton#primary, QPushButton#addFile, QPushButton[prominent="true"] { color:#090910; background:#ece8fa; border:1px solid #f5f3ff; border-radius:18px; font-weight:600; }
+QPushButton#primary:hover, QPushButton#addFile:hover, QPushButton[prominent="true"]:hover { background:#ffffff; color:#090910; }
+QPushButton#primary:disabled, QPushButton#addFile:disabled, QPushButton[prominent="true"]:disabled { color:#7e899e; background:rgba(236,232,250,22); border-color:transparent; }
+QPushButton#captureLaunch, QPushButton#captureLaunch[secondary="true"] { color:#a6b4cc; background:transparent; border:0; text-align:left; font-size:13px; }
+QPushButton#captureLaunch:hover { color:#f5f7ff; background:rgba(255,255,255,12); }
+QLineEdit, QComboBox, QPlainTextEdit, QSpinBox { color:#f5f7ff; background:rgba(255,255,255,9); border:1px solid rgba(255,255,255,26); border-radius:8px; }
+QLineEdit:focus, QComboBox:focus { border-color:#b9bad2; }
+QTableWidget#libraryTable { background:transparent; alternate-background-color:rgba(255,255,255,3); }
+QTableWidget#libraryTable::item { border:0; border-bottom:1px solid rgba(255,255,255,16); }
+QTableWidget#libraryTable::item:selected { background:#263246; color:#f5f7ff; }
+QHeaderView::section, QTableWidget#libraryTable QHeaderView::section { background:transparent; color:#8a99b3; border:0; border-bottom:1px solid rgba(255,255,255,24); padding:7px 12px; font-size:11px; }
+QStatusBar { background:#08101e; color:#8d9bb4; }
+"""

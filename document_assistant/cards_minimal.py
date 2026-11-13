@@ -110,6 +110,7 @@ class MinimalDetailPane(DetailPane):
             super().paintEvent(event)
 
     def show_item(self, row):
+        self.banner.setStyleSheet('')
         super().show_item(row)
         from .theme import CURRENT_THEME
         if CURRENT_THEME == 'starry':

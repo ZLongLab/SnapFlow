@@ -2,6 +2,7 @@
 import copy,json
 
 DEFAULT_TOOLS={
+    'pen':{'color':'#e34f45','width':3},
     'rectangle':{'color':'#e34f45','width':3},
     'arrow':{'color':'#e34f45','width':3},
     'text':{'color':'#e34f45','size':22},

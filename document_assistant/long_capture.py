@@ -13,7 +13,7 @@ import time
 import uuid
 from fractions import Fraction
 from ctypes import wintypes
-from PySide6.QtCore import QAbstractNativeEventFilter, QObject, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QAbstractNativeEventFilter, QObject, QRectF, Qt, QTimer, Signal, QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from .capture_pixels import crop_selection
@@ -129,6 +129,35 @@ class LongControls(QWidget):
         event.accept()
 
 
+class LiveLongPreview(QWidget):
+    """Read-only live miniature; shares existing parts without full-image copies."""
+    def __init__(self):
+        super().__init__(None,Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint|Qt.WindowType.WindowTransparentForInput)
+        self.setWindowTitle('长截图实时预览 · DocumentAssistant')
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.parts=[];self.total=1;self.source_width=1;self.viewport=(0,1)
+        self.max_display_height=480
+        self.setFixedSize(220,480)
+
+    def refresh(self,stitcher):
+        self.parts=list(stitcher.parts);self.total=stitcher.height;self.source_width=stitcher.width
+        self.setFixedHeight(max(110,min(self.max_display_height,math.ceil((self.width()-16)*self.total/self.source_width)+60)))
+        self.viewport=(stitcher.position-stitcher.top,stitcher.previous.height());self.update()
+
+    def paintEvent(self,event):
+        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.fillRect(self.rect(),QColor('#172a3b'));p.setPen(QColor('#e8f2fa'))
+        p.drawText(10,24,'长图实时预览')
+        scale=min((self.width()-16)/self.source_width,(self.height()-60)/self.total)
+        x=(self.width()-self.source_width*scale)/2;y=36.
+        for part in self.parts:
+            p.drawImage(QRectF(x,y,part.width()*scale,part.height()*scale),part);y+=part.height()*scale
+        p.setBrush(Qt.BrushStyle.NoBrush);p.setPen(QPen(QColor('#80d5ff'),2))
+        p.drawRect(QRectF(x,36+self.viewport[0]*scale,self.source_width*scale,self.viewport[1]*scale))
+        p.setPen(QColor('#b9cfdf'));p.drawText(8,self.height()-10,f'{self.source_width} × {self.total} px');p.end()
+
+
 class LongCaptureSession(QObject):
     completed = Signal(object, str, int)
     cancelled = Signal()
@@ -144,6 +173,7 @@ class LongCaptureSession(QObject):
         self.diagnostic_home = Path(getattr(parent, 'home', None) or os.environ.get('DOCUMENTASSISTANT_HOME', default_home))
         self.initial_frame = initial_frame.copy() if initial_frame is not None else None
         self.controls = LongControls(hotkey); self.outline = None; self.keys = None
+        self.preview=LiveLongPreview();self.preview_updated=0.
         self.controls.finish_requested.connect(self.finish); self.controls.cancel_requested.connect(self.cancel)
         self.controls.diagnostic_requested.connect(self.save_diagnostics)
         global_rect = QRectF(rect); global_rect.translate(self.geometry.topLeft())
@@ -167,6 +197,27 @@ class LongCaptureSession(QObject):
             self.initial_frame = None
             self.keys = CaptureKeys(self.finish, self.cancel)
             self.outline = RegionOutline(self.global_rect); self.outline.show()
+            area=self.screen.availableGeometry();region=self.global_rect
+            for side in ('right','left'):
+                room=(area.right()-region.right()-24) if side=='right' else (region.left()-area.left()-24)
+                if room<100:continue
+                w=min(220,int(room));h=min(480,area.height()-32)
+                self.preview.setFixedSize(w,h)
+                self.preview.max_display_height=h
+                x=int(region.right()+12) if side=='right' else int(region.left()-w-12)
+                y=max(area.top()+8,min(int(region.top()),area.bottom()-h-8))
+                candidate=QRectF(x,y,w,h)
+                if self.position is not None and candidate.intersects(QRectF(self.position.x(),self.position.y(),self.controls.width(),self.controls.height())):continue
+                self.preview.move(x,y);self.preview.refresh(self.stitcher);self.preview.show();break
+            if not self.preview.isVisible():
+                for height in (320,180,110):
+                    self.preview.setFixedSize(min(220,area.width()-24),height)
+                    self.preview.max_display_height=height
+                    point=controls_position(area,region,self.preview.size())
+                    if point is None:continue
+                    candidate=QRectF(point.x(),point.y(),self.preview.width(),height)
+                    if self.position is not None and candidate.intersects(QRectF(self.position.x(),self.position.y(),self.controls.width(),self.controls.height())):continue
+                    self.preview.move(point);self.preview.refresh(self.stitcher);self.preview.show();break
             if self.position is not None:
                 self.controls.move(self.position); self.controls.show()
             self.update_count(); self.timer.start()
@@ -197,13 +248,16 @@ class LongCaptureSession(QObject):
                         'prepended': '已拼接上方新内容，可继续向上或向下滚动',
                         'covered': '正在查看已采集内容，越过上端或下端后继续扩展',
                         'unchanged': '等待滚动；向上或向下均可，结束时点完成',
-                        'no_overlap': '未找到连续内容；可点“保存诊断”，回到最近位置后继续',
+                        'no_overlap': '检测到画面变化，但未能确认接缝；可保存诊断，回到最近位置继续',
                         'size_changed': '画面大小改变，已保留当前长图'}
             if result.status == 'limit':
                 self.finish('已达到长图大小上限，保留已采集内容'); return
             if result.status == 'size_changed':
                 self.finish(messages[result.status]); return
             self.controls.status.setText(messages[result.status]); self.update_count()
+            now=time.monotonic()
+            if now-self.preview_updated>=.12:
+                self.preview.refresh(self.stitcher);self.preview_updated=now
         except Exception as exc:
             self.finish(str(exc))
 
@@ -315,6 +369,7 @@ class LongCaptureSession(QObject):
 
     def teardown(self):
         self.timer.stop()
+        self.preview.close();self.preview.deleteLater()
         if self.keys:
             self.keys.shutdown(); self.keys = None
         if self.outline:

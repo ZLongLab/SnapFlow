@@ -27,6 +27,7 @@ class SelectionOverlay(QWidget):
         self.setCursor(Qt.CursorShape.CrossCursor);self.setMouseTracking(True)
         self.setWindowTitle('DocumentAssistant · 框选截图');self.setGeometry(screen.geometry())
         self.mode='photo';self.stop_key='Alt+S';self.selection_locked=False
+        self.long_submitted=False
         self.video_audio_mode='silent'
         self.canvas=None;self.crop_origin=None;self.tool='view';self.error_text=''
         self.saved_path=self.saved_image=None
@@ -54,12 +55,11 @@ class SelectionOverlay(QWidget):
         modes.addWidget(self.video_audio_combo);self.video_audio_combo.hide()
         divider=QFrame();divider.setObjectName('selectionDivider');divider.setFixedSize(1,22);modes.addSpacing(7);modes.addWidget(divider);modes.addSpacing(7)
         self.hint_label=QLabel();self.hint_label.setObjectName('selectionHint');modes.addWidget(self.hint_label)
-        self.action_layout.addWidget(self.modes)
         self.action_layout.setSizeConstraint(QHBoxLayout.SizeConstraint.SetNoConstraint)
         self.style_groups=[];self.option_groups={}
         self.photo_controls=[];self.tool_buttons={};self.tool_group=QButtonGroup(self)
         for key,title,icon in [('view','调整选区','capture'),('select','选择 / 移动标注','cursor'),
-                              ('rectangle','矩形','rectangle'),('arrow','箭头','arrow'),('text','文字','text'),('mask','马赛克 · 按住拖动自由涂抹','mask')]:
+                              ('pen','画笔 · 按住拖动自由绘画','pen'),('rectangle','矩形','rectangle'),('arrow','箭头','arrow'),('text','文字','text'),('mask','马赛克 · 按住拖动自由涂抹','mask')]:
             button=QPushButton();button.setFixedSize(34,34);button.setCheckable(True)
             button.setToolTip(title);button.setAccessibleName(title);button.setIcon(line_icon(icon,ICON_COLOR));button.setIconSize(QSize(21,21))
             button.clicked.connect(lambda checked=False,value=key:self.set_tool(value))
@@ -82,7 +82,7 @@ class SelectionOverlay(QWidget):
             self.style_groups.append((caption,title,spin))
             self.option_groups[attr]=group
         self.width_spin.valueChanged.connect(lambda value:self.change_style(width=value))
-        self.width_spin.setToolTip('矩形或箭头的线宽')
+        self.width_spin.setToolTip('画笔、矩形或箭头的线宽')
         self.size_spin.valueChanged.connect(lambda value:self.change_style(size=value))
         self.brush_spin.valueChanged.connect(lambda value:self.change_style(brush=value))
         self.block_spin.valueChanged.connect(lambda value:self.change_style(block=value))
@@ -96,6 +96,7 @@ class SelectionOverlay(QWidget):
         self.save_label='保存到桌面'
         self.save_button.setFixedHeight(34)
         self.save_button.clicked.connect(self.save);self.action_layout.addWidget(self.save_button);self.photo_controls.append(self.save_button)
+        self.action_layout.addWidget(self.modes)
         cancel=QPushButton();cancel.setFixedSize(34,34);cancel.setIcon(line_icon('close','#ff827c'));cancel.setIconSize(QSize(22,22))
         self.cancel_button=cancel
         cancel.setToolTip('取消 · Esc');cancel.setAccessibleName('取消截图');cancel.clicked.connect(self.cancelled.emit);self.action_layout.addWidget(cancel)
@@ -114,7 +115,7 @@ class SelectionOverlay(QWidget):
         if not hasattr(self,'hint_label'):return
         hint='框选后直接标注  ·  Enter 复制  ·  Esc 取消'
         if self.mode=='video':hint=audio_label(self.video_audio_mode)+'  ·  '+self.stop_key+' 停止'
-        if self.mode=='long':hint='框选正文后上下滚动  ·  Enter 开始'
+        if self.mode=='long':hint='框选正文后自动开始，直接上下滚动'
         if self.selection_locked:hint='区域已锁定  ·  Esc 取消'
         if self.error_text:hint=self.error_text
         self.hint_label.setToolTip('拖动选取区域；拖动边缘调整大小，内部移动。'+hint)
@@ -150,7 +151,9 @@ class SelectionOverlay(QWidget):
         self.refresh_toolbar()
         if self.actions.isVisible():self.position_actions()
         self.update()
-        if announce:self.mode_changed.emit(mode)
+        if announce:
+            self.mode_changed.emit(mode)
+            if mode=='long' and self.start is not None:self.confirm()
     def lock_selection(self):
         self.selection_locked=True;self.drag=None
         self.modes.setEnabled(False);self.confirm_button.setEnabled(False)
@@ -174,7 +177,7 @@ class SelectionOverlay(QWidget):
         # on narrow screens. The completion action is never clipped or wrapped.
         if self._modes_stacked:
             self.toolbar_layout.removeWidget(self.modes)
-            self.action_layout.insertWidget(0,self.modes);self._modes_stacked=False
+            self.action_layout.insertWidget(self.action_layout.indexOf(self.cancel_button),self.modes);self._modes_stacked=False
         icons=[*self.tool_buttons.values(),self.undo_button,self.redo_button,self.cancel_button]
         for button in icons:button.setFixedSize(34,34)
         for button in self.color_buttons:button.setFixedSize(22,22)
@@ -188,7 +191,7 @@ class SelectionOverlay(QWidget):
         self.modes.adjustSize()
         if self.action_layout.sizeHint().width()+padding>available:
             self.action_layout.removeWidget(self.modes)
-            self.toolbar_layout.insertWidget(0,self.modes,0,Qt.AlignmentFlag.AlignLeft);self._modes_stacked=True
+            self.toolbar_layout.addWidget(self.modes,0,Qt.AlignmentFlag.AlignRight);self._modes_stacked=True
             self.action_layout.invalidate()
         if self.action_layout.sizeHint().width()+padding>available:
             for button in icons:button.setFixedSize(24,34)
@@ -234,8 +237,8 @@ class SelectionOverlay(QWidget):
         if not hasattr(self,'block_spin'):return
         kind=self.effective_tool();photo=self.mode=='photo' and self.start is not None
         for widget in self.photo_controls:widget.setVisible(photo)
-        for button in self.color_buttons:button.setVisible(photo and kind in ('rectangle','arrow','text'))
-        visible={'width_spin':kind in ('rectangle','arrow'),'size_spin':kind=='text',
+        for button in self.color_buttons:button.setVisible(photo and kind in ('pen','rectangle','arrow','text'))
+        visible={'width_spin':kind in ('pen','rectangle','arrow'),'size_spin':kind=='text',
                  'brush_spin':kind=='mask','block_spin':kind=='mask'}
         for attr,group in self.option_groups.items():group.setVisible(photo and visible[attr])
         values=dict(self.tool_preferences.get(kind,{}))
@@ -372,6 +375,7 @@ class SelectionOverlay(QWidget):
             self.start=self.end=None;self.refresh_options();self.position_actions();self.update();return
         r=QRectF(r.toAlignedRect()).intersected(QRectF(self.rect()))
         self.start,self.end=r.topLeft(),r.bottomRight();self.refresh_canvas(reset);self.position_actions();self.update()
+        if self.mode=='long':self.confirm()
 
     def rendered(self):
         if self.canvas:
@@ -389,7 +393,10 @@ class SelectionOverlay(QWidget):
             if self.selection_rect().width()>=2 and self.selection_rect().height()>=2:self.video_selected.emit(self.selection_rect())
             return
         if self.mode=='long':
+            if self.long_submitted:return
             if self.selection_rect().width()>=80 and self.selection_rect().height()>=80:
+                self.long_submitted=True
+                self.lock_selection()
                 self.long_selected.emit(self.selection_rect())
             else:self.show_error('长截图请框选至少 80 × 80 的正文区域')
             return

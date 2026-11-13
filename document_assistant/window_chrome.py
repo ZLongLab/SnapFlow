@@ -16,7 +16,7 @@ def caption_palette(theme):
     from .theme import THEME_COLORS,normalize_theme
     theme=normalize_theme(theme);colors=THEME_COLORS[theme]
     return {'dark':theme=='starry',
-            'caption':'#0b1b2a' if theme=='starry' else colors['page_bg'],
+            'caption':'#08101e' if theme=='starry' else colors['page_bg'],
             'text':colors['text'],
             'border':0xfffffffe if theme=='starry' else 0xffffffff}
 

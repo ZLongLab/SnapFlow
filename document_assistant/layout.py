@@ -139,6 +139,13 @@ class WorkflowSteps(QWidget):
         self.set_stage(self.stage)
 
 
+def page_title_html(index,theme_name):
+    base='整理你的文档' if index==0 else '你的文档库'
+    caption={'starry':'Orbit','ocean':'Aqua','rose':'Rose'}[theme_name]
+    color={'starry':'#b9bdce','ocean':'#526d82','rose':'#805f66'}[theme_name]
+    return base+f' <span style="font-family:Georgia;font-size:23px;font-style:italic;font-weight:400;color:{color}">{caption}</span>'
+
+
 def apply_theme(window, theme_name, *, persist=True):
     theme_name = normalize_theme(theme_name)
     switch_theme(theme_name)
@@ -147,23 +154,27 @@ def apply_theme(window, theme_name, *, persist=True):
     if getattr(window, '_compact_layout', False):
         from .theme_minimal import build_minimal_qss
         from .theme_starry import STARRY_QSS
-        window.setStyleSheet(WORKBENCH_QSS + build_minimal_qss(colors) + (STARRY_QSS if theme_name == 'starry' else ''))
+        from .theme_variants import light_qss
+        window.setStyleSheet(WORKBENCH_QSS + build_minimal_qss(colors) + (STARRY_QSS if theme_name == 'starry' else light_qss(colors,theme_name)))
     else:
         window.setStyleSheet(WORKBENCH_QSS)
 
+    if hasattr(window,'page_title') and hasattr(window,'tabs'):
+        window.page_title.setText(page_title_html(window.tabs.currentIndex(),theme_name))
     if hasattr(window, 'theme_toggle'):
         if theme_name == 'starry':
-            window.theme_toggle.setText('主题：星空毛玻璃')
+            window.theme_toggle.setText('主题：星空毛玻璃 · Orbit')
             window.theme_toggle.setToolTip('蓝黑星空与背景磨砂玻璃；点击切换其他主题')
         elif theme_name == 'ocean':
             window.theme_toggle.setText('主题：海蓝晶石')
             window.theme_toggle.setToolTip('当前为海蓝晶石。点击切换为暖玫瑰金。')
         else:
             window.theme_toggle.setText('主题：暖玫瑰金')
-            window.theme_toggle.setToolTip('当前为暖玫瑰金。点击切换为海蓝晶石。')
+            window.theme_toggle.setToolTip('当前为暖玫瑰金。点击切换为星空毛玻璃。')
         window.theme_toggle.setIcon(line_icon('more', colors['footer_text']))
 
     if hasattr(window, 'shelf') and window.shelf:
+        window.shelf.setVisible(True)
         window.shelf.update()
     if hasattr(window, 'library_art') and window.library_art:
         window.library_art.update()
@@ -175,13 +186,16 @@ def apply_theme(window, theme_name, *, persist=True):
 
     if hasattr(window, 'details_panel') and window.details_panel:
         window.details_panel.refresh_theme()
+        window.details_panel.show_item(window.details_panel.row)
+    if hasattr(window, 'cards_view'):
+        window.cards_view.sync()
 
     if hasattr(window, 'nav_buttons') and hasattr(window, 'tabs'):
         idx = window.tabs.currentIndex()
         for i, nav in enumerate(window.nav_buttons):
             nav.setIcon(line_icon('import' if i == 0 else 'library', '#ffffff' if i == idx else colors['nav_text']))
     if hasattr(window, 'screenshot_button'):
-        window.screenshot_button.setIcon(line_icon('capture', '#ffffff'))
+        window.screenshot_button.setIcon(line_icon('capture', colors['text'] if theme_name!='starry' else '#ffffff'))
     for attribute, symbol in (('source_button', 'folder'), ('library_button', 'folder'),
                               ('open_folder_button', 'folder'), ('open_source_button', 'open')):
         if hasattr(window, attribute):
@@ -190,6 +204,8 @@ def apply_theme(window, theme_name, *, persist=True):
         window.library_edit.actions()[0].setIcon(line_icon('folder', colors['muted']))
     if hasattr(window, 'search_edit') and window.search_edit.actions():
         window.search_edit.actions()[0].setIcon(line_icon('search', colors['muted']))
+    if hasattr(window, 'sidebar_folder_icon'):
+        window.sidebar_folder_icon.setPixmap(line_icon('folder', colors['muted']).pixmap(18, 18))
     if hasattr(window, 'library_title_icon'):
         window.library_title_icon.setPixmap(line_icon('library', colors['primary_bg']).pixmap(28, 28))
     if hasattr(window, 'more_button'):
@@ -201,6 +217,8 @@ def apply_theme(window, theme_name, *, persist=True):
         window.topbar_frame.style().polish(window.topbar_frame)
     if hasattr(window.centralWidget(), 'set_theme'):
         window.centralWidget().set_theme(theme_name, colors['page_bg'])
+    for attr,icon in (('archive_button','check'),('open_archive_button','open'),('file_button','plus')):
+        if hasattr(window,attr):getattr(window,attr).setIcon(line_icon(icon,'#090910' if theme_name=='starry' else '#ffffff'))
     if hasattr(window, 'window_chrome'):
         window.window_chrome.set_theme(theme_name)
 
@@ -250,7 +268,7 @@ def build_window(window, *, compact=False):
     root_layout.setContentsMargins(0, 0, 0, 0)
     root_layout.setSpacing(0)
     sidebar, side = frame('sidebar', margins=(14, 24, 14, 18), spacing=18)
-    sidebar.setFixedWidth(200 if compact else 220)
+    sidebar.setFixedWidth(224 if compact else 220)
     brand = QHBoxLayout()
     mark = label('', 'brandMark')
     mark.setFixedSize(36, 42)
@@ -281,15 +299,16 @@ def build_window(window, *, compact=False):
     window.screenshot_button.setMinimumHeight(52)
     window.screenshot_button.setToolTip('框选屏幕，标注后保存或复制；快捷键可在截图设置中修改')
     side.addWidget(window.screenshot_button)
-    window.shelf = ShelfArtwork()
+    from .orbit_art import OrbitSidebar
+    window.shelf = OrbitSidebar()
     side.addWidget(window.shelf, 1)
     if compact:
-        window.shelf.hide()
-        side.addStretch(1)
+        window.shelf.setMinimumHeight(0)
     footer,footer_layout=frame('sidebarFooter',margins=(8,10,8,8),spacing=7)
     footer_layout.addWidget(label('当前文档库','footerCaption'))
     location=QHBoxLayout();location.setContentsMargins(8,0,8,4);location.setSpacing(8)
     folder_icon=label('');folder_icon.setPixmap(line_icon('folder','#cbded2').pixmap(18,18));location.addWidget(folder_icon)
+    window.sidebar_folder_icon = folder_icon
     from .path_label import LibraryPathLabel
     window.sidebar_path=LibraryPathLabel('尚未选择文档库')
     location.addWidget(window.sidebar_path,1);footer_layout.addLayout(location)
@@ -297,7 +316,7 @@ def build_window(window, *, compact=False):
     window.theme_toggle = button('主题：海蓝晶石', lambda: toggle_theme(window), 'more')
     window.theme_toggle.setObjectName('footerAction')
     window.theme_toggle.setMinimumHeight(38)
-    window.theme_toggle.setToolTip('点击切换海蓝晶石与暖玫瑰金主题')
+    window.theme_toggle.setToolTip('点击循环切换星空毛玻璃、海蓝晶石与暖玫瑰金主题')
     footer_layout.addWidget(window.theme_toggle)
     window.more_button = button('更多操作', lambda: window.more_menu.popup(
         window.more_button.mapToGlobal(QPoint(0, -window.more_menu.sizeHint().height()))), 'more')
@@ -354,6 +373,7 @@ def build_window(window, *, compact=False):
     titles = QVBoxLayout()
     titles.setSpacing(5)
     window.page_title = label('整理你的文档', 'pageTitle')
+    window.page_title.setTextFormat(Qt.TextFormat.RichText)
     window.page_subtitle = label('检查分类建议，确认后复制到文档库', 'subtitle')
     window.page_subtitle.setWordWrap(True)
     title_row=QHBoxLayout();title_row.setSpacing(12)
@@ -591,7 +611,7 @@ def build_window(window, *, compact=False):
     window.next_page.hide()
     window.page_label.setText('共 0 项')
     search_layout.addLayout(pages)
-    search_actionbar, search_bottom = frame('actionbar', QHBoxLayout, (0, 14, 0, 14), 12)
+    search_actionbar, search_bottom = frame('actionbar', QHBoxLayout, (16, 12, 16, 12), 10)
     library_summary = QVBoxLayout()
     from .presentation import ElidingLabel
     window.library_selection = ElidingLabel('选择一个文件')
@@ -626,7 +646,7 @@ def build_window(window, *, compact=False):
         window.topbar_frame.style().unpolish(window.topbar_frame)
         window.topbar_frame.style().polish(window.topbar_frame)
         window.nav_buttons[index].setChecked(True)
-        window.page_title.setText('整理你的文档' if index == 0 else '你的文档库')
+        window.page_title.setText(page_title_html(index,window.centralWidget().theme_name))
         window.page_subtitle.setText('检查分类建议，确认后复制到文档库' if index == 0
                                      else '搜索正文、课程与项目，直接打开已归档文件')
         window.steps_label.setVisible(index == 0)

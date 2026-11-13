@@ -73,7 +73,7 @@ class UnifiedCaptureToolbarTests(unittest.TestCase):
         overlay.canvas.marks=[('rectangle',QPointF(20,20),QPointF(90,90),'','#e34f45')]
         image=overlay.rendered().copy()
         for mode in ('long','video','photo'):
-            QTest.mouseClick(overlay.mode_buttons[mode],Qt.MouseButton.LeftButton)
+            overlay.set_mode(mode) # Controller synchronization must not submit.
             self.assertEqual(overlay.selection_rect(),selection)
             self.assertEqual(overlay.mode,mode)
             if mode=='video':self.assertTrue(overlay.video_audio_combo.isVisible())

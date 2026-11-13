@@ -219,7 +219,7 @@ def _verify_shift(previous,current,shift):
     return agreement,-difference,exact,shift
 
 
-def vertical_shift(previous,current,raw_previous=None,raw_current=None):
+def _whole_shift(previous,current,raw_previous=None,raw_current=None):
     height=len(previous);overlap_min=max(48,min(128,height//12))
     max_shift=height-overlap_min
     if max_shift<1:return None
@@ -279,6 +279,33 @@ def vertical_shift(previous,current,raw_previous=None,raw_current=None):
     if any(abs(other[3]-best[3])>2 and other[0]>=best[0]-.02 and other[1]>=best[1]-.35
            and other[2]>=best[2]*.8 for other in candidates[1:]):return None
     return best[3]
+
+
+def vertical_shift(previous,current,raw_previous=None,raw_current=None):
+    result=_whole_shift(previous,current,raw_previous,raw_current)
+    if result is not None:return result
+    # A fixed sidebar disagrees at every row of the moving article. Verify
+    # independent full-height panels instead of weakening global pixel checks.
+    # A stationary sidebar alone can never vote for a nonzero displacement.
+    raw_previous=raw_previous or [bytes(v*8 for v in row) for row in previous]
+    raw_current=raw_current or [bytes(v*8 for v in row) for row in current]
+    width=len(previous[0]);band_width=width//6
+    if band_width<12:return None
+    votes=Counter();stationary=0
+    for band in range(6):
+        lo,hi=band*band_width,(band+1)*band_width
+        a=[row[lo:hi] for row in previous];b=[row[lo:hi] for row in current]
+        ra=[row[lo:hi] for row in raw_previous];rb=[row[lo:hi] for row in raw_current]
+        if ra==rb:stationary+=1;continue
+        shift=_whole_shift(a,b,ra,rb)
+        if shift==0:stationary+=1
+        if shift is not None and shift!=0:votes[shift]+=1
+    best=votes.most_common(2)
+    # Half of the sampled viewport must independently confirm exactly the
+    # same motion. Conflicting/repeated patterns and tiny moving patches fail.
+    if not best or best[0][1]<3 or len(best)>1 and best[1][1]>=best[0][1]:return None
+    if 6-best[0][1]-stationary>1:return None
+    return best[0][0]
 
 
 def frames_settled(previous,current):

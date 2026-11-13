@@ -116,7 +116,7 @@ class CaptureEditor(QDialog):
         group=QFrame();group.setObjectName('toolGroup')
         group_layout=QHBoxLayout(group);group_layout.setContentsMargins(4,4,4,4);group_layout.setSpacing(3)
         self.tool_buttons={};self.tool_group=QButtonGroup(self)
-        for index,(name,key,icon_name) in enumerate([('查看','view','cursor'),('选择','select','cursor'),('矩形','rectangle','rectangle'),('箭头','arrow','arrow'),('文字','text','text'),('马赛克','mask','mask')]):
+        for index,(name,key,icon_name) in enumerate([('查看','view','cursor'),('选择','select','cursor'),('画笔','pen','pen'),('矩形','rectangle','rectangle'),('箭头','arrow','arrow'),('文字','text','text'),('马赛克','mask','mask')]):
             self.tools.addItem(name,key)
             button=QPushButton(name);button.setObjectName('tool');button.setCheckable(True);button.setAutoDefault(False)
             button.setIcon(line_icon(icon_name,'#4b6c5a'));button.setIconSize(QSize(17,17))

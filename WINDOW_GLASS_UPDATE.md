@@ -17,9 +17,9 @@
 
 已更新本机桌面及开始菜单的 `DocumentAssistant.lnk`；桌面启动热键为 **Ctrl+Alt+D**，截图热键仍独立配置。两处快捷方式指向当前 D 盘源码启动器，并使用新的玻璃 ICO。
 
-桌面：`%Desktop%\DocumentAssistant.lnk`。
+桌面：`C:\Users\Lenovo\OneDrive\桌面\DocumentAssistant.lnk`。
 
-开始菜单：`%APPDATA%\Microsoft\Windows\Start Menu\Programs\DocumentAssistant.lnk`。
+开始菜单：`C:\Users\Lenovo\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\DocumentAssistant.lnk`。
 
 其他电脑可运行项目原有 `install-shortcuts.ps1` 创建本机快捷方式；下载的旧安装包不包含本轮更新。
 

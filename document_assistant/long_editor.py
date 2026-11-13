@@ -70,7 +70,7 @@ class LongImageEditor(QDialog):
         tools = QHBoxLayout(self.toolbar); tools.setContentsMargins(9, 7, 9, 7); tools.setSpacing(5)
         self.tool_group = QButtonGroup(self); self.tool_buttons = {}
         for kind, title, icon in [('view','浏览 · 拖动上下查看','cursor'),('select','选择 / 移动标注','cursor'),
-                                  ('rectangle','矩形','rectangle'),('arrow','箭头','arrow'),('text','文字','text'),('mask','马赛克','mask')]:
+                                  ('pen','画笔 · 按住拖动自由绘画','pen'),('rectangle','矩形','rectangle'),('arrow','箭头','arrow'),('text','文字','text'),('mask','马赛克','mask')]:
             b = QPushButton('浏览' if kind == 'view' else ''); b.setCheckable(True); b.setFixedHeight(34)
             if kind != 'view':
                 b.setIcon(line_icon(icon, '#edf5f0')); b.setIconSize(QSize(20, 20)); b.setFixedWidth(32)
@@ -144,7 +144,7 @@ class LongImageEditor(QDialog):
         kind = self.effective_tool(); values = dict(self.preferences.get(kind,{}))
         if self.canvas.selected_index is not None:
             mark = self.canvas.marks[self.canvas.selected_index]; values.update(style_of(mark)); values['color'] = mark[4]
-        visible={'rectangle':('width',),'arrow':('width',),'text':('size',),'mask':('brush','block')}.get(kind,())
+        visible={'pen':('width',),'rectangle':('width',),'arrow':('width',),'text':('size',),'mask':('brush','block')}.get(kind,())
         for key, group in self.option_groups.items():
             group.setVisible(key in visible)
         for key, spin in self.spins.items():
@@ -152,7 +152,7 @@ class LongImageEditor(QDialog):
                 blocked = spin.blockSignals(True); spin.setValue(values[key]); spin.blockSignals(blocked)
         color = values.get('color','#e34f45')
         for b, choice in zip(self.color_buttons,COLORS):
-            b.setVisible(kind in ('rectangle','arrow','text')); b.setChecked(choice == color)
+            b.setVisible(kind in ('pen','rectangle','arrow','text')); b.setChecked(choice == color)
         self.canvas.color = color; self.canvas.line_width = self.spins['width'].value(); self.canvas.text_size = self.spins['size'].value()
         self.canvas.brush_size = self.spins['brush'].value(); self.canvas.mosaic_block = self.spins['block'].value()
         self.undo_button.setEnabled(bool(self.canvas.history)); self.redo_button.setEnabled(bool(self.canvas.future)); self.canvas.update()

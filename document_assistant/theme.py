@@ -162,6 +162,8 @@ THEME_COLORS: dict[str, dict[str, str]] = {
 # ---------------------------------------------------------------------------
 from .theme_starry import STARRY_PALETTE, STARRY_QSS
 THEME_COLORS['starry'] = {**THEME_COLORS['ocean'], **STARRY_PALETTE}
+from .theme_variants import PALETTES,light_qss
+for _name,_palette in PALETTES.items():THEME_COLORS[_name].update(_palette)
 CURRENT_THEME: str = 'ocean'
 WORKBENCH_QSS: str = ''
 
@@ -351,7 +353,7 @@ QFrame#topbar[library="true"] {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:0,
 QLabel#libraryTitleIcon {{ background:{c['library_icon_bg']}; border:1px solid {c['library_icon_border']}; border-radius:{r_nav}; }}
 """
 
-    return qss + (STARRY_QSS if name == 'starry' else '')
+    return qss + (STARRY_QSS if name == 'starry' else light_qss(c,name))
 
 
 # ---------------------------------------------------------------------------

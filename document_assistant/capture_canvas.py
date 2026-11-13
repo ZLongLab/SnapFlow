@@ -3,7 +3,7 @@ import copy,math
 from PySide6.QtCore import QPointF,QRectF,Qt,Signal
 from PySide6.QtGui import QColor,QPainter,QPainterPath,QPen
 from PySide6.QtWidgets import QWidget,QInputDialog
-from .capture_markup import draw_annotation,render_annotations,mark_bounds,style_of,mosaic_path,pixelated_image
+from .capture_markup import draw_annotation,render_annotations,mark_bounds,style_of,mosaic_path,pen_path,pixelated_image
 
 class AnnotationCanvas(QWidget):
     changed=Signal()
@@ -65,6 +65,7 @@ class AnnotationCanvas(QWidget):
         style={'width':self.line_width,'size':self.text_size}
         if self.tool=='mask':
             style.update(brush=self.brush_size,block=self.mosaic_block)
+        if self.tool in ('pen','mask'):
             style['path']=[(p.x()-start.x(),p.y()-start.y()) for p in self.stroke or [start]]
         return (self.tool,QPointF(start),QPointF(end),text,self.color,style)
     def commit(self,marks,before=None):
@@ -78,6 +79,7 @@ class AnnotationCanvas(QWidget):
             mark=self.marks[index];bounds=mark_bounds(mark,self.image.size()).adjusted(-8/self.scale(),-8/self.scale(),8/self.scale(),8/self.scale())
             if not bounds.contains(point):continue
             if mark[0]=='mask' and not mosaic_path(mark).contains(point):continue
+            if mark[0]=='pen' and not pen_path(mark,8/self.scale()).contains(point):continue
             if mark[0]=='arrow':
                 a,b=mark[1:3];dx,dy=b.x()-a.x(),b.y()-a.y();length=dx*dx+dy*dy
                 t=max(0,min(1,((point.x()-a.x())*dx+(point.y()-a.y())*dy)/max(length,1)))
@@ -98,7 +100,7 @@ class AnnotationCanvas(QWidget):
             text,ok=QInputDialog.getText(self,'添加文字','文字内容（最多 500 字）')
             if ok and text.strip():self.append_mark(self.new_mark(point,point,text[:500]))
         else:
-            self.start=self.end=point;self.stroke=[QPointF(point)] if self.tool=='mask' else [];self.update()
+            self.start=self.end=point;self.stroke=[QPointF(point)] if self.tool in ('pen','mask') else [];self.update()
     def mouseMoveEvent(self,event):
         if self.drag_position is not None:
             self.pan+=event.position()-self.drag_position;self.drag_position=event.position();self.clamp_pan();self.update();return
@@ -106,12 +108,12 @@ class AnnotationCanvas(QWidget):
         if self.moving is not None and point is not None:
             mark=list(self.move_before[self.selected_index]);delta=point-self.moving
             bounds=mark_bounds(mark,self.image.size())
-            if mark[0]=='mask':bounds=bounds.intersected(QRectF(0,0,self.image.width(),self.image.height()))
+            if mark[0] in ('pen','mask'):bounds=bounds.intersected(QRectF(0,0,self.image.width(),self.image.height()))
             delta=QPointF(max(-bounds.left(),min(self.image.width()-bounds.right(),delta.x())),max(-bounds.top(),min(self.image.height()-bounds.bottom(),delta.y())))
             mark[1]=QPointF(mark[1])+delta;mark[2]=QPointF(mark[2])+delta;self.marks[self.selected_index]=tuple(mark);self.update()
         elif self.start is not None:
             self.end=point or self.end
-            if self.tool=='mask' and point is not None and (point-self.stroke[-1]).manhattanLength()>=2:
+            if self.tool in ('pen','mask') and point is not None and (point-self.stroke[-1]).manhattanLength()>=2:
                 self.stroke.append(QPointF(point))
             self.update()
     def mouseReleaseEvent(self,event):
@@ -122,8 +124,8 @@ class AnnotationCanvas(QWidget):
             self.mouseMoveEvent(event);self.commit(self.marks,self.move_before);self.moving=self.move_before=None
         elif self.start is not None:
             self.end=self.image_point(event.position()) or self.end
-            if self.tool=='mask' and self.end!=self.stroke[-1]:self.stroke.append(QPointF(self.end))
-            if self.tool=='mask' or math.hypot(self.end.x()-self.start.x(),self.end.y()-self.start.y())>=2:
+            if self.tool in ('pen','mask') and self.end!=self.stroke[-1]:self.stroke.append(QPointF(self.end))
+            if self.tool in ('pen','mask') or math.hypot(self.end.x()-self.start.x(),self.end.y()-self.start.y())>=2:
                 self.append_mark(self.new_mark(self.start,self.end))
             self.start=self.end=None;self.stroke=[];self.update()
     def mouseDoubleClickEvent(self,event):

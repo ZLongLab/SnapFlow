@@ -1,6 +1,6 @@
 """Native table presentation; no document or database operations."""
 from PySide6.QtCore import QByteArray, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPen
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QLabel, QSizePolicy, QStyle, QStyledItemDelegate, QTableWidget
 
@@ -16,6 +16,7 @@ PATHS = {
     "settings": '<circle cx="12" cy="12" r="3"/><path d="M10 3h4l1 3 3 1 3 3v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/>',
     'capture': '<path d="M8 3H4a1 1 0 0 0-1 1v4m13-5h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4m8 0h4a1 1 0 0 0 1-1v-4"/><rect x="7" y="7" width="10" height="10" rx="2"/>',
     'cursor': '<path d="m5 3 14 10-7 1-3 7z"/>',
+    'pen': '<path d="m4 20 4-1L20 7l-3-3L5 16l-1 4Zm11-14 3 3"/>',
     'rectangle': '<rect x="4" y="5" width="16" height="14" rx="2"/>',
     'arrow': '<path d="m5 19 14-14M9 5h10v10"/>',
     'text': '<path d="M4 6V4h16v2M12 4v16M8 20h8"/>',
@@ -136,8 +137,14 @@ class TwoLineDelegate(QStyledItemDelegate):
             if CURRENT_THEME == 'starry':
                 bg, ink = {'PDF':('#352332','#ffd1b5'),'DOCX':('#22304b','#b7d3ff'),
                            'DOC':('#22304b','#b7d3ff'),'TXT':('#1c3437','#b2dfd8')}.get(suffix,('#293945','#d0e0eb'))
-            painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor(bg))
-            painter.drawRoundedRect(badge,7,7)
+            if CURRENT_THEME == 'starry':
+                ink={'PDF':'#fbbf24','DOCX':'#7dd3fc','DOC':'#7dd3fc','TXT':'#6ee7b7'}.get(suffix,'#c4b5fd')
+                badge=QRect(rect.left(),rect.center().y()-14,28,28)
+                glow=QColor(ink);glow.setAlpha(26);painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(glow)
+                painter.drawEllipse(badge.adjusted(-4,-4,4,4))
+                border=QColor(ink);border.setAlpha(140);painter.setPen(QPen(border,.8));painter.setBrush(QColor('#101b2c'));painter.drawEllipse(badge)
+            else:
+                painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor(bg));painter.drawRoundedRect(badge,7,7)
             badge_font = QFont(font)
             badge_font.setPixelSize(9)
             painter.setFont(badge_font)
@@ -189,15 +196,21 @@ class CategoryDelegate(QStyledItemDelegate):
         from .theme import CURRENT_THEME
         if CURRENT_THEME == 'starry':
             background, ink = {
-                '实验报告':('#203149','#bdd8ff'), '研究文献':('#392532','#ffd1b5'),
-                '课程资料':('#233c50','#c1dff3'), '项目资料':('#1c3430','#b2dfcf'),
+                '实验报告':('#142b3b','#7dd3fc'), '研究文献':('#302b1c','#fbbf24'),
+                '课程资料':('#27283e','#c4b5fd'), '项目资料':('#14352f','#6ee7b7'),
                 '个人资料':('#3e253d','#f2c4df'), '其他':('#29313d','#d1d8e1'),
                 '待整理':('#3c301e','#f3d79d'),
             }.get(text, ('#233c50','#c1dff3'))
         font=QFont(option.font);font.setPixelSize(12);painter.setFont(font)
-        width=min(option.rect.width()-20,painter.fontMetrics().horizontalAdvance(text)+20)
-        rect=QRect(option.rect.x()+10,option.rect.center().y()-13,max(1,width),26)
+        width=min(option.rect.width()-20,painter.fontMetrics().horizontalAdvance(text)+(30 if CURRENT_THEME=='starry' else 20))
+        height=23 if CURRENT_THEME=='starry' else 26
+        rect=QRect(option.rect.x()+10,option.rect.center().y()-height//2,max(1,width),height)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing);painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor(background))
-        painter.drawRoundedRect(rect,10,10);painter.setPen(QColor(ink))
+        if CURRENT_THEME=='starry':
+            border=QColor(ink);border.setAlpha(95);painter.setPen(QPen(border,.7))
+        painter.drawRoundedRect(rect,11,11)
+        if CURRENT_THEME=='starry':
+            painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor(ink));painter.drawEllipse(QRect(rect.left()+8,rect.center().y()-2,4,4));rect.adjust(9,0,0,0)
+        painter.setPen(QColor(ink))
         text=painter.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(1,rect.width()-14))
         painter.drawText(rect,Qt.AlignmentFlag.AlignCenter,text);painter.restore()
