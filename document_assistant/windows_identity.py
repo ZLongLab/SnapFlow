@@ -7,10 +7,34 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-APP_ID = 'DocumentAssistant.Workbench'
-ICON_PATH = Path(__file__).with_name('documentassistant-glass.ico')
+APP_ID = 'SnapFlow.Capture'
+ICON_PATH = Path(__file__).with_name('snapflow.ico')
+if not ICON_PATH.is_file():
+    ICON_PATH = Path(__file__).with_name('documentassistant-glass.ico')
 if not ICON_PATH.is_file():
     ICON_PATH = Path(__file__).with_name('documentassistant.ico')
+
+
+def apply_titlebar_theme(widget, dark=True):
+    """Apply light/dark titlebar and matching caption color on Windows 10/11; safe no-op elsewhere."""
+    if sys.platform != 'win32' or widget is None:
+        return
+    try:
+        hwnd = int(widget.winId())
+        dwmapi = ctypes.windll.dwmapi
+        enabled = ctypes.c_int(1 if dark else 0)
+        if dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(enabled), ctypes.sizeof(enabled)) != 0:
+            dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(enabled), ctypes.sizeof(enabled))
+        # COLORREF is BGR: #131926 -> 0x00261913, #f3f6fb -> 0x00FBF6F3
+        caption = ctypes.c_uint32(0x00261913 if dark else 0x00FBF6F3)
+        dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption), ctypes.sizeof(caption))
+    except Exception:
+        pass
+
+
+def apply_dark_titlebar(widget):
+    """Apply dark titlebar and matching caption color on Windows 10/11."""
+    apply_titlebar_theme(widget, dark=True)
 
 
 def configure_process():
@@ -130,7 +154,7 @@ def tag_window(hwnd):
                 command = subprocess.list2cmdline(arguments)
             put(store, 2, command)
             put(store, 3, str(ICON_PATH) + ',0')
-            put(store, 4, 'DocumentAssistant')
+            put(store, 4, 'SnapFlow')
             put(store, 5, APP_ID)
             if get_app_id(store) != APP_ID:
                 raise OSError('Window AppUserModelID verification failed')

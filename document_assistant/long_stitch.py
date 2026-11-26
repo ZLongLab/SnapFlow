@@ -128,7 +128,7 @@ def _verify_occluded_rows(a,b,foreground,differences,ys,overlap,step,total,minim
         # virtually all foreground within sixteen levels. Text is not eligible.
         if np.median(fg.sum(axis=1))<a.shape[1]*.25 or len(kept)<60:return None
         if agreement<.995 or difference>2.:return None
-    elif agreement<.94 or difference>6. or exact<12:return None
+    elif agreement<.94 or difference>6. or (exact<12 and not (agreement>=.97 and difference<=2.5 and len(kept)>=max(minimum,24) and count>=120)):return None
     return agreement,-difference,exact,shift
 
 
@@ -281,6 +281,30 @@ def _whole_shift(previous,current,raw_previous=None,raw_current=None):
     return best[3]
 
 
+def _sticky_margin_shift(previous,current,raw_previous=None,raw_current=None):
+    """Detect stationary sticky top header and/or bottom footer and match the moving interior."""
+    raw_prev=raw_previous or [bytes(v*8 for v in row) for row in previous]
+    raw_curr=raw_current or [bytes(v*8 for v in row) for row in current]
+    a,b=_row_array(raw_prev),_row_array(raw_curr)
+    height=len(a)
+    if height<160:return None
+    row_diff=np.mean(np.abs(a-b),axis=1)
+    max_m=int(height*0.25)
+    top_m=0
+    while top_m<max_m and row_diff[top_m]<=1.5:top_m+=1
+    bot_m=0
+    while bot_m<max_m and row_diff[height-1-bot_m]<=1.5:bot_m+=1
+    if top_m<12:top_m=0
+    if bot_m<12:bot_m=0
+    if not (top_m or bot_m):return None
+    body_h=height-top_m-bot_m
+    if body_h<max(160,int(height*0.55)):return None
+    if float(np.mean(row_diff[top_m:height-bot_m]>2.0))<0.08:return None
+    shift=_whole_shift(previous[top_m:height-bot_m],current[top_m:height-bot_m],raw_prev[top_m:height-bot_m],raw_curr[top_m:height-bot_m])
+    if shift is None or shift==0:return None
+    return shift,top_m,bot_m
+
+
 def vertical_shift(previous,current,raw_previous=None,raw_current=None):
     result=_whole_shift(previous,current,raw_previous,raw_current)
     if result is not None:return result
@@ -328,6 +352,7 @@ class VerticalStitcher:
         # unknown absolute scroll position. The captured interval grows at both ends.
         self.position=0;self.top=0;self.bottom=first.height()
         self.max_height=max_height;self.max_pixels=max_pixels
+        self.sticky_top=0;self.sticky_bottom=0;self.footer_part=None
 
     @property
     def width(self):return self.previous.width()
@@ -345,7 +370,11 @@ class VerticalStitcher:
             self._update_reference(frame,raw,signatures)
             return StitchResult('unchanged')
         shift=vertical_shift(self.signatures,signatures,self.raw_signatures,raw)
-        if shift is None:return StitchResult('no_overlap')
+        sticky_info=None
+        if shift is None:
+            sticky_info=_sticky_margin_shift(self.signatures,signatures,self.raw_signatures,raw)
+            if sticky_info is None:return StitchResult('no_overlap')
+            shift,top_m,bot_m=sticky_info
         if shift==0:
             # A pause can still repaint text or fade hover controls. Once the
             # verifier confirms zero movement, track that latest appearance.
@@ -353,13 +382,35 @@ class VerticalStitcher:
             # Failed matches must never replace this trusted reference.
             self._update_reference(frame,raw,signatures)
             return StitchResult('unchanged')
+        if sticky_info is not None:
+            _,top_m,bot_m=sticky_info
+            if self.sticky_top==0 and top_m>0:self.sticky_top=top_m
+            if self.sticky_bottom==0 and bot_m>0:
+                last=self.parts[-1]
+                if last.height()>bot_m:
+                    self.parts[-1]=last.copy(0,0,last.width(),last.height()-bot_m)
+                    self.footer_part=frame.copy(0,frame.height()-bot_m,frame.width(),bot_m)
+                    self.sticky_bottom=bot_m
+                    self.bottom-=bot_m
         position=self.position+shift
-        top=min(self.top,position);bottom=max(self.bottom,position+frame.height())
+        usable_bottom=position+frame.height()-self.sticky_bottom
+        top=min(self.top,position);bottom=max(self.bottom,usable_bottom)
         added_top=self.top-top;added_bottom=bottom-self.bottom
-        new_height=bottom-top
+        new_height=(bottom-top)+(self.footer_part.height() if self.footer_part is not None else 0)
         if new_height>self.max_height or self.width*new_height>self.max_pixels:return StitchResult('limit')
-        if added_top:self.parts.insert(0,frame.copy(0,0,frame.width(),added_top))
-        if added_bottom:self.parts.append(frame.copy(0,frame.height()-added_bottom,frame.width(),added_bottom))
+        if added_top:
+            if self.sticky_top>0 and self.parts and self.parts[0].height()>self.sticky_top:
+                header=self.parts[0].copy(0,0,self.width,self.sticky_top)
+                self.parts[0]=self.parts[0].copy(0,self.sticky_top,self.width,self.parts[0].height()-self.sticky_top)
+                self.parts.insert(0,frame.copy(0,self.sticky_top,self.width,added_top))
+                self.parts.insert(0,header)
+            else:
+                self.parts.insert(0,frame.copy(0,0,frame.width(),added_top))
+        if added_bottom:
+            slice_y=frame.height()-self.sticky_bottom-added_bottom
+            self.parts.append(frame.copy(0,slice_y,frame.width(),added_bottom))
+        if self.sticky_bottom>0:
+            self.footer_part=frame.copy(0,frame.height()-self.sticky_bottom,frame.width(),self.sticky_bottom)
         self._update_reference(frame,raw,signatures);self.height=new_height
         self.position=position;self.top=top;self.bottom=bottom
         if added_top:return StitchResult('prepended',added_top)
@@ -371,4 +422,5 @@ class VerticalStitcher:
         if result.isNull():raise MemoryError('长图过大，无法分配图片内存')
         painter=QPainter(result);y=0
         for part in self.parts:painter.drawImage(0,y,part);y+=part.height()
+        if self.footer_part is not None:painter.drawImage(0,y,self.footer_part)
         painter.end();result.setDevicePixelRatio(1);return result

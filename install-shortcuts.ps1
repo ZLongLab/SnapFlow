@@ -13,11 +13,12 @@ if (-not (Test-Path -LiteralPath $pythonExecutable)) {
 $launcher = Join-Path $projectDirectory 'start.ps1'
 $target = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $launcher + '" -Windowed'
-$description = 'DocumentAssistant | managed local launcher'
+$description = 'SnapFlow | managed local launcher'
 $runtimeDirectory = Join-Path (Split-Path $projectDirectory -Parent) 'DocumentAssistant-local'
 if ($env:DOCUMENTASSISTANT_HOME) { $runtimeDirectory = $env:DOCUMENTASSISTANT_HOME }
 $shell = New-Object -ComObject WScript.Shell
-$icon = Join-Path $projectDirectory 'document_assistant\documentassistant-glass.ico'
+$icon = Join-Path $projectDirectory 'document_assistant\snapflow.ico'
+if (-not (Test-Path -LiteralPath $icon)) { $icon = Join-Path $projectDirectory 'document_assistant\documentassistant-glass.ico' }
 if (-not (Test-Path -LiteralPath $icon)) { $icon = Join-Path $projectDirectory 'document_assistant\documentassistant.ico' }
 if (-not (Test-Path -LiteralPath $icon)) { throw '专属图标缺失，请重新下载完整项目。' }
 $plans = @()
@@ -32,7 +33,7 @@ try {
     # Preflight every destination; preserve unrelated existing shortcuts.
     foreach ($plan in $plans) {
         if (-not $plan.Folder) { throw '无法找到当前用户的桌面或开始菜单位置。' }
-        $path = Join-Path $plan.Folder 'DocumentAssistant.lnk'
+        $path = Join-Path $plan.Folder 'SnapFlow.lnk'
         if (Test-Path -LiteralPath $path) {
             $existing = $shell.CreateShortcut($path)
             $owned = $existing.Description -eq $description
@@ -42,11 +43,11 @@ try {
     }
     foreach ($plan in $plans) {
         New-Item -ItemType Directory -Path $plan.Folder -Force | Out-Null
-        $path = Join-Path $plan.Folder 'DocumentAssistant.lnk'
+        $path = Join-Path $plan.Folder 'SnapFlow.lnk'
         if (Test-Path -LiteralPath $path) {
             $backupDirectory = Join-Path $runtimeDirectory ('shortcut-backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
-            Copy-Item -LiteralPath $path -Destination (Join-Path $backupDirectory 'DocumentAssistant.lnk')
+            Copy-Item -LiteralPath $path -Destination (Join-Path $backupDirectory 'SnapFlow.lnk')
         }
         $shortcut = $shell.CreateShortcut($path)
         $shortcut.TargetPath = $target

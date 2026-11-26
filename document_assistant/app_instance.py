@@ -36,7 +36,7 @@ class AppInstance(QObject):
         if self.forward(activate=activate):return False
         if not self.lock.tryLock(0):
             if self.forward(2000,activate=activate):return False
-            raise RuntimeError('程序已经在启动或退出，请稍后重试；可检查系统托盘中的 DocumentAssistant')
+            raise RuntimeError('程序已经在启动或退出，请稍后重试；可检查系统托盘中的 SnapFlow')
         self.owns_lock=True
         # Only the process holding the lock can remove an abandoned local server.
         QLocalServer.removeServer(self.name)

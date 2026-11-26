@@ -13,9 +13,9 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBo
     QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QMenu, QMessageBox, QPushButton, QScrollArea, QSystemTrayIcon, QVBoxLayout, QWidget, QFrame, QButtonGroup, QSizePolicy, QSpinBox)
 from .capture_hotkey import GlobalHotkey, parse_hotkey
-from .windows_identity import ICON_PATH
+from .windows_identity import ICON_PATH, apply_dark_titlebar, apply_titlebar_theme
 from .capture_style import CAPTURE_QSS
-from .presentation import line_icon
+from .capture_icons import line_icon
 from .ui_flow import FlowLayout
 
 
@@ -94,7 +94,7 @@ class CaptureEditor(QDialog):
         super().__init__(None)
         self.controller=controller
         self.destination=Path(controller.settings['directory']).resolve()
-        self.setWindowTitle('截图编辑 · DocumentAssistant')
+        self.setWindowTitle('截图编辑 · SnapFlow')
         width=max(860,min(1180,image.width()+96))
         height=max(500,min(850,round(image.height()*min((width-64)/image.width(),1))+280))
         self.resize(width,height);self.setMinimumSize(560,400)
@@ -116,7 +116,7 @@ class CaptureEditor(QDialog):
         group=QFrame();group.setObjectName('toolGroup')
         group_layout=QHBoxLayout(group);group_layout.setContentsMargins(4,4,4,4);group_layout.setSpacing(3)
         self.tool_buttons={};self.tool_group=QButtonGroup(self)
-        for index,(name,key,icon_name) in enumerate([('查看','view','cursor'),('选择','select','cursor'),('画笔','pen','pen'),('矩形','rectangle','rectangle'),('箭头','arrow','arrow'),('文字','text','text'),('马赛克','mask','mask')]):
+        for index,(name,key,icon_name) in enumerate([('查看','view','cursor'),('选择','select','cursor'),('画笔','pen','pen'),('荧光笔','highlighter','highlighter'),('矩形','rectangle','rectangle'),('箭头','arrow','arrow'),('文字','text','text'),('序号','step','step'),('马赛克','mask','mask')]):
             self.tools.addItem(name,key)
             button=QPushButton(name);button.setObjectName('tool');button.setCheckable(True);button.setAutoDefault(False)
             button.setIcon(line_icon(icon_name,'#4b6c5a'));button.setIconSize(QSize(17,17))
@@ -181,13 +181,19 @@ class CaptureEditor(QDialog):
         footer.addLayout(destination,1)
         desktop=Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)).resolve()
         save_title='保存到桌面' if Path(controller.settings['directory']).resolve()==desktop else '保存图片'
+        self.pin_button=QPushButton('贴到屏幕');self.pin_button.setAutoDefault(False)
+        self.pin_button.setIcon(line_icon('pin','#4b6c5a'))
+        self.beautify_button=QPushButton('美化套壳');self.beautify_button.setAutoDefault(False)
+        self.beautify_button.setIcon(line_icon('sparkle','#4b6c5a'))
         self.save_button=QPushButton(save_title);self.save_button.setObjectName('saveCapture');self.save_button.setAutoDefault(False)
         self.save_button.setToolTip('保存 PNG 到 '+controller.settings['directory'])
         self.copy_button=QPushButton('仅复制');self.copy_button.setObjectName('copyCapture')
         self.copy_button.setIcon(line_icon('copy','#ffffff'));self.copy_button.setDefault(True)
         cancel=QPushButton('取消');cancel.setObjectName('cancelCapture');cancel.setAutoDefault(False)
+        self.pin_button.clicked.connect(self.pin_capture)
+        self.beautify_button.clicked.connect(self.beautify_capture)
         self.save_button.clicked.connect(self.save);self.copy_button.clicked.connect(self.copy);cancel.clicked.connect(self.reject)
-        for widget in (cancel,self.save_button,self.copy_button):footer.addWidget(widget)
+        for widget in (cancel,self.pin_button,self.beautify_button,self.save_button,self.copy_button):footer.addWidget(widget)
         self.message=QLabel();self.message.setObjectName('captureError');self.message.setWordWrap(True);self.message.hide()
         self.message_container=QHBoxLayout();self.message_container.setContentsMargins(20,10,20,0)
         self.message_container.addWidget(self.message);layout.addLayout(self.message_container)
@@ -251,12 +257,49 @@ class CaptureEditor(QDialog):
         except Exception as exc:self.show_error(str(exc));return
         self.controller.notify('截图已复制','可以粘贴到 Word 或聊天窗口');self.accept()
 
+    def pin_capture(self):
+        if hasattr(self.controller, 'pin_image'):
+            self.controller.pin_image(self.canvas.rendered())
+            self.accept()
+
+    def beautify_capture(self):
+        if hasattr(self.controller, 'beautify_image'):
+            image=self.canvas.rendered()
+            self.accept()
+            self.controller.beautify_image(image)
+
+
+def _capture_dialog_qss(dark: bool) -> str:
+    if dark:
+        return """
+        QDialog { background:#131926; color:#eef5fc; font-family:'Microsoft YaHei UI'; font-size:13px; }
+        QLabel { color:#cbd9ea; background:transparent; }
+        QLineEdit { background:#1d2638; color:#eef5fc; border:1px solid #32425e; border-radius:10px; padding:9px 12px; selection-background-color:#2563eb; }
+        QLineEdit:focus { border-color:#60a5fa; }
+        QPushButton { background:#232e44; color:#e4eff9; border:1px solid #32425e; border-radius:10px; padding:8px 15px; font-weight:500; }
+        QPushButton:hover { background:#2b3954; border-color:#60a5fa; }
+        QPushButton:default { background:#2563eb; border-color:#3b82f6; color:#ffffff; font-weight:600; }
+        QPushButton:default:hover { background:#3b82f6; }
+        """
+    return """
+    QDialog { background:#f4f7fb; color:#0f172a; font-family:'Microsoft YaHei UI'; font-size:13px; }
+    QLabel { color:#475569; background:transparent; }
+    QLineEdit { background:#ffffff; color:#0f172a; border:1px solid #d5e0ee; border-radius:10px; padding:9px 12px; selection-background-color:#2563eb; }
+    QLineEdit:focus { border-color:#3b82f6; }
+    QPushButton { background:#ffffff; color:#1e293b; border:1px solid #d5e0ee; border-radius:10px; padding:8px 15px; font-weight:500; }
+    QPushButton:hover { background:#eff6ff; border-color:#60a5fa; }
+    QPushButton:default { background:#2563eb; border-color:#2563eb; color:#ffffff; font-weight:600; }
+    QPushButton:default:hover { background:#3b82f6; }
+    """
+
 
 class CaptureSettingsDialog(QDialog):
     def __init__(self,controller):
         super().__init__(controller.window)
         self.controller=controller
-        self.setWindowTitle('截图设置');self.resize(620,300);self.setStyleSheet(CAPTURE_QSS)
+        dark = getattr(controller.window, 'theme_name', 'light') == 'dark'
+        self.setWindowTitle('截图设置 · SnapFlow');self.resize(620,300);self.setStyleSheet(_capture_dialog_qss(dark))
+        apply_titlebar_theme(self, dark=dark)
         layout=QVBoxLayout(self);form=QFormLayout()
         self.hotkey=QLineEdit(controller.settings['hotkey'])
         self.directory=QLineEdit(controller.settings['directory'])
@@ -281,6 +324,30 @@ class CaptureSettingsDialog(QDialog):
         self.accept()
 
 
+def _tray_menu_qss(dark: bool) -> str:
+    if dark:
+        return """
+        QMenu {
+            background-color:#1c2537; color:#e6eef8; border:1px solid #32425e;
+            border-radius:12px; padding:6px; font-family:'Microsoft YaHei UI'; font-size:13px;
+        }
+        QMenu::item { padding:7px 14px 7px 10px; border-radius:8px; margin:1px 2px; }
+        QMenu::item:selected { background-color:#283752; color:#ffffff; }
+        QMenu::item:disabled { color:#64748b; }
+        QMenu::separator { height:1px; background:#2b3850; margin:5px 8px; }
+        """
+    return """
+    QMenu {
+        background-color:#ffffff; color:#1e293b; border:1px solid #d5e0ee;
+        border-radius:12px; padding:6px; font-family:'Microsoft YaHei UI'; font-size:13px;
+    }
+    QMenu::item { padding:7px 14px 7px 10px; border-radius:8px; margin:1px 2px; }
+    QMenu::item:selected { background-color:#eff6ff; color:#2563eb; }
+    QMenu::item:disabled { color:#94a3b8; }
+    QMenu::separator { height:1px; background:#e2e8f0; margin:5px 8px; }
+    """
+
+
 class CaptureController:
     def __init__(self,window,activate=True):
         self.window=window;self.app=QApplication.instance()
@@ -301,7 +368,7 @@ class CaptureController:
         self.shortcut_expiry=QTimer(window);self.shortcut_expiry.setSingleShot(True)
         self.shortcut_expiry.timeout.connect(self.clear_shortcut_frame)
         self.hotkey=GlobalHotkey(self.app,lambda:self.begin(from_hotkey=True),self.freeze_shortcut_frame,self.clear_shortcut_frame)
-        self.overlays=[];self.editor=None;self.capturing=False;self.restore_main=False
+        self.overlays=[];self.editor=None;self.capturing=False;self.restore_main=False;self.initial_mode='photo';self.pins=[];self.pin_clear=None
         self.exiting=False;self.exit_pending=False;self.stopped=False;self.last_saved=None
         self.from_hotkey=False;self.previous_foreground=None
         self.recording=None;self.record_controls=None;self.video_stop=None;self.last_video=None
@@ -310,18 +377,14 @@ class CaptureController:
         self.video_countdown=QTimer(window);self.video_countdown.setInterval(1000)
         self.video_countdown.timeout.connect(self.countdown_video)
         self.tray=None
+        self.tray_menu=None
+        self.act_capture=self.act_long=self.act_video=self.act_panel=self.act_settings=self.act_startup=self.act_folder=self.act_last_img=self.act_last_vid=self.act_exit=None
+        self._tray_recent_sep=None
         if activate:
             if QSystemTrayIcon.isSystemTrayAvailable():
                 self.tray=QSystemTrayIcon(QIcon(str(ICON_PATH)),window)
-                self.tray.setToolTip('DocumentAssistant · 截图 '+self.settings['hotkey'])
-                menu=QMenu(window)
-                menu.addAction('框选截图',self.begin);menu.addAction('打开文件管理',self.show_main)
-                self.video_stop=menu.addAction('停止视频录制',self.stop_recording);self.video_stop.setEnabled(False)
-                self.long_stop=menu.addAction('结束长截图',self.finish_long);self.long_stop.setEnabled(False)
-                menu.addAction('截图设置',self.show_settings);menu.addAction('打开截图保存目录',self.open_directory)
-                menu.addAction('打开最近保存的截图',self.open_last)
-                menu.addAction('打开最近保存的视频',self.open_last_video)
-                menu.addSeparator();menu.addAction('退出程序',self.exit)
+                self.tray.setToolTip('SnapFlow · 截图 '+self.settings['hotkey'])
+                menu=self._build_tray_menu()
                 self.tray.setContextMenu(menu)
                 self.tray.activated.connect(lambda reason:self.show_main() if reason==QSystemTrayIcon.ActivationReason.DoubleClick else None)
                 self.tray.show();self.app.setQuitOnLastWindowClosed(False)
@@ -351,13 +414,86 @@ class CaptureController:
         if prepared:self.hotkey.commit(prepared)
         self.settings=data
         self.update_entry()
-        if self.tray:self.tray.setToolTip('DocumentAssistant · 截图 '+data['hotkey'])
+        if self.tray:self.tray.setToolTip('SnapFlow · 截图 '+data['hotkey'])
+
+    def _build_tray_menu(self):
+        menu=QMenu(self.window)
+        menu.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup|Qt.WindowType.NoDropShadowWindowHint)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.tray_menu=menu
+        self.act_capture=menu.addAction('框选截图',self.begin)
+        self.act_long=menu.addAction('滚动长截图',lambda:self.begin(mode='long'))
+        self.act_video=menu.addAction('区域录屏',lambda:self.begin(mode='video'))
+        self.video_stop=menu.addAction('停止视频录制',self.stop_recording);self.video_stop.setEnabled(False)
+        self.long_stop=menu.addAction('结束长截图',self.finish_long);self.long_stop.setEnabled(False)
+        self.pin_clear=menu.addAction('关闭全部贴图',self.close_all_pins);self.pin_clear.setEnabled(False)
+        menu.addSeparator()
+        self.act_panel=menu.addAction('打开 SnapFlow 画廊',self.show_main)
+        self.act_settings=menu.addAction('截图与快捷键设置',self.show_settings)
+        self.act_startup=menu.addAction('开机自启动',self.window.show_settings)
+        self.act_folder=menu.addAction('打开保存目录',self.open_directory)
+        self._tray_recent_sep=menu.addSeparator()
+        self.act_last_img=menu.addAction('打开最近保存的截图',self.open_last)
+        self.act_last_vid=menu.addAction('打开最近保存的视频',self.open_last_video)
+        menu.addSeparator()
+        self.act_exit=menu.addAction('退出 SnapFlow',self.exit)
+        menu.aboutToShow.connect(self._prepare_tray_menu)
+        self._prepare_tray_menu()
+        return menu
+
+    def _prepare_tray_menu(self):
+        menu=self.tray_menu
+        if menu is None:return
+        dark=getattr(self.window,'theme_name','light')=='dark'
+        menu.setStyleSheet(_tray_menu_qss(dark))
+        ink='#cbd9ea' if dark else '#334155'
+        accent='#60a5fa' if dark else '#2563eb'
+        if self.act_capture:
+            self.act_capture.setText(f"框选截图  {self.settings['hotkey']}")
+            self.act_capture.setIcon(line_icon('capture',accent))
+        if self.act_long:self.act_long.setIcon(line_icon('scroll',ink))
+        if self.act_video:self.act_video.setIcon(line_icon('video',ink))
+        recording_active=bool(getattr(self,'recording',None) and not self.recording.done)
+        long_active=bool(getattr(self,'long_capture',None) and not self.long_capture.done)
+        has_pins=bool(getattr(self,'pins',None))
+        if self.video_stop:
+            self.video_stop.setEnabled(recording_active)
+            self.video_stop.setVisible(recording_active)
+            self.video_stop.setIcon(line_icon('video','#ef4444'))
+        if self.long_stop:
+            self.long_stop.setEnabled(long_active)
+            self.long_stop.setVisible(long_active)
+            self.long_stop.setIcon(line_icon('scroll','#10b981'))
+        if self.pin_clear:
+            self.pin_clear.setEnabled(has_pins)
+            self.pin_clear.setVisible(has_pins)
+            self.pin_clear.setText(f'关闭全部贴图 ({len(self.pins)})' if has_pins else '关闭全部贴图')
+            self.pin_clear.setIcon(line_icon('pin',ink))
+        if self.act_panel:self.act_panel.setIcon(line_icon('open',ink))
+        if self.act_settings:self.act_settings.setIcon(line_icon('settings',ink))
+        if self.act_startup:self.act_startup.setIcon(line_icon('power',ink))
+        if self.act_folder:self.act_folder.setIcon(line_icon('folder',ink))
+        has_img=bool(self.last_saved and self.last_saved.is_file())
+        has_vid=bool(self.last_video and self.last_video.is_file())
+        if self.act_last_img:
+            self.act_last_img.setVisible(has_img)
+            self.act_last_img.setIcon(line_icon('capture',ink))
+        if self.act_last_vid:
+            self.act_last_vid.setVisible(has_vid)
+            self.act_last_vid.setIcon(line_icon('video',ink))
+        if self._tray_recent_sep:self._tray_recent_sep.setVisible(has_img or has_vid)
+        if self.act_exit:self.act_exit.setIcon(line_icon('close','#ef4444'))
+
+    def _notify_window_refresh(self):
+        if hasattr(self.window, 'refresh_summary'):
+            self.window.refresh_summary(self)
 
     def update_entry(self):
         key=self.settings['hotkey']
         active=hasattr(self,'hotkey') and self.hotkey.ident is not None
         self.window.screenshot_button.setText(('框选截图  '+key if len(key)<=7 else '框选截图') if active else '框选截图 · 热键未启用')
         self.window.screenshot_button.setToolTip(('截图快捷键 '+key if active else key+' 未启用，可能被占用；仍可点击截图')+'；可切换长截图或视频，再按热键完成采集或停止录制')
+        self._notify_window_refresh()
 
     def remember_tools(self,value):
         self.tool_preferences=normalize_tools(value)
@@ -406,7 +542,7 @@ class CaptureController:
             return list(zip(self.app.screens(),saved[3]))
         return None
 
-    def begin(self,*_,from_hotkey=False):
+    def begin(self,*_,from_hotkey=False,mode='photo'):
         if self.long_capture and not self.long_capture.done:
             self.finish_long();return
         if getattr(self,'recording',None) and not self.recording.done:
@@ -415,6 +551,7 @@ class CaptureController:
         if QApplication.activeModalWidget():
             self.notify('请先关闭对话框','关闭当前设置或确认窗口后再截图');return
         self.capturing=True
+        self.initial_mode=mode if mode in ('photo','long','video') else 'photo'
         self.from_hotkey=from_hotkey
         self.previous_foreground=foreground_window() if from_hotkey else None
         frames=self.take_shortcut_frame() if from_hotkey else None
@@ -448,8 +585,14 @@ class CaptureController:
                 overlay.save_button.setToolTip('保存 PNG 到：'+str(directory)+'，并复制到剪贴板')
                 overlay.selected.connect(lambda image,target=overlay:self.complete_inline(image,target))
                 overlay.save_selected.connect(lambda image,target=overlay:self.save_inline(image,target))
+                overlay.pin_selected.connect(lambda image,target=overlay:self.pin_inline(image,target))
+                overlay.beautify_selected.connect(lambda image,target=overlay:self.beautify_inline(image,target))
+                overlay.color_picked.connect(self.color_picked)
                 overlay.cancelled.connect(self.cancel)
+                if getattr(self,'initial_mode','photo')!='photo':
+                    overlay.set_mode(self.initial_mode)
                 self.overlays.append(overlay)
+            self.initial_mode='photo'
             # Every snapshot is taken before any selection overlay becomes visible.
             for overlay in self.overlays:overlay.show();overlay.raise_()
             active=next((o for o in self.overlays if o.geometry().contains(QCursor.pos())),self.overlays[0])
@@ -481,7 +624,63 @@ class CaptureController:
         except Exception as exc:
             overlay.show_error('图片已保存，复制失败，可重试：'+str(exc))
             self.notify('截图已保存',str(path));return
-        self.close_overlays();self.finished();self.notify('截图已保存并复制',str(path))
+        self.close_overlays();self.finished();self._notify_window_refresh();self.notify('截图已保存并复制',str(path))
+
+    def _refresh_pin_menu(self):
+        if getattr(self,'pin_clear',None):self.pin_clear.setEnabled(bool(self.pins))
+
+    def pin_image(self,image,screen=None):
+        from .capture_pin import PinnedImageWindow
+        pin=PinnedImageWindow(image,self,screen=screen)
+        self.pins.append(pin)
+        def _drop(*_):
+            if pin in self.pins:self.pins.remove(pin)
+            self._refresh_pin_menu()
+        pin.destroyed.connect(_drop)
+        self._refresh_pin_menu()
+        pin.show();pin.raise_()
+        return pin
+
+    def pin_inline(self,image,overlay):
+        target_screen=overlay.screen_ref
+        self.close_overlays();self.finished()
+        self.pin_image(image,screen=target_screen)
+        self.notify('已贴到桌面','拖动移动 · 滚轮缩放 · Ctrl+滚轮调透明度 · 双击关闭')
+
+    def beautify_image(self,image,screen=None):
+        from .capture_beautify import BeautifyDialog
+        dialog=BeautifyDialog(image,self)
+        if screen:
+            area=screen.availableGeometry()
+            dialog.resize(min(dialog.width(),area.width()-32),min(dialog.height(),area.height()-48))
+            dialog.move(area.x()+(area.width()-dialog.width())//2,area.y()+(area.height()-dialog.height())//2)
+        dialog.show();dialog.raise_();dialog.activateWindow()
+        return dialog
+
+    def beautify_inline(self,image,overlay):
+        target_screen=overlay.screen_ref
+        self.close_overlays()
+        dialog=self.beautify_image(image,screen=target_screen)
+        self.editor=dialog
+        dialog.finished.connect(self.finished)
+
+    def edit_image(self,image,screen=None):
+        editor=CaptureEditor(image,self)
+        if screen:
+            area=screen.availableGeometry()
+            editor.resize(min(editor.width(),area.width()-32),min(editor.height(),area.height()-48))
+            editor.move(area.x()+(area.width()-editor.width())//2,area.y()+(area.height()-editor.height())//2)
+        editor.show();editor.raise_();editor.activateWindow()
+        return editor
+
+    def color_picked(self,hex_code):
+        self.close_overlays();self.finished()
+        self.notify('已复制色值',hex_code)
+
+    def close_all_pins(self):
+        for pin in list(getattr(self,'pins',[])):
+            pin.close()
+        self._refresh_pin_menu()
 
     def selected(self,image,screen=None):
         self.close_overlays()
@@ -501,6 +700,7 @@ class CaptureController:
         from .video_audio import normalize_audio_mode
         self.video_audio_mode=normalize_audio_mode(mode)
         for overlay in self.overlays:overlay.set_video_audio_mode(self.video_audio_mode)
+        self._notify_window_refresh()
 
     def is_desktop_destination(self):
         desktop=QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
@@ -652,8 +852,9 @@ class CaptureController:
             QTimer.singleShot(250,cleanup)
         if getattr(self,'record_controls',None):self.record_controls.close();self.record_controls.deleteLater();self.record_controls=None
         if getattr(self,'video_stop',None):self.video_stop.setEnabled(False)
-        if getattr(self,'tray',None):self.tray.setToolTip('DocumentAssistant · 截图 '+self.settings['hotkey'])
+        if getattr(self,'tray',None):self.tray.setToolTip('SnapFlow · 截图 '+self.settings['hotkey'])
         self.capturing=False
+        if hasattr(self.window,'refresh_summary'):self.window.refresh_summary(self)
         if self.restore_main and not self.exiting:
             if self.from_hotkey:
                 self.window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating,True)
@@ -688,9 +889,6 @@ class CaptureController:
         if self.capturing:
             self.notify('请先完成截图或录制','录制时按截图热键停止，保存或关闭预览后再退出');return
         self.exiting=True
-        if self.window.worker and not self.exit_pending:
-            self.exit_pending=True
-            self.window.worker.finished.connect(lambda:QTimer.singleShot(0,self.window.close))
         self.window.close()
 
     def shutdown(self):
@@ -698,6 +896,7 @@ class CaptureController:
         if self.stopped:return
         self.stopped=True;self.exiting=True
         self.close_overlays();self.hotkey.shutdown()
+        self.close_all_pins()
         if self.long_capture:
             self.long_capture.blockSignals(True);self.long_capture.cancel();self.long_capture.deleteLater();self.long_capture=None
         self.video_countdown.stop()

@@ -3,10 +3,10 @@ VSVersionInfo(
                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0,0)),
   kids=[StringFileInfo([StringTable('040904B0', [
     StringStruct('CompanyName', 'ZLongLab'),
-    StringStruct('FileDescription', 'DocumentAssistant'),
+    StringStruct('FileDescription', 'SnapFlow'),
     StringStruct('FileVersion', '0.23.4'),
-    StringStruct('InternalName', 'DocumentAssistant'),
-    StringStruct('OriginalFilename', 'DocumentAssistant.exe'),
-    StringStruct('ProductName', 'DocumentAssistant'),
+    StringStruct('InternalName', 'SnapFlow'),
+    StringStruct('OriginalFilename', 'SnapFlow.exe'),
+    StringStruct('ProductName', 'SnapFlow'),
     StringStruct('ProductVersion', '0.23.4')])]),
     VarFileInfo([VarStruct('Translation', [1033,1200])])])

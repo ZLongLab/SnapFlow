@@ -1,10 +1,10 @@
 """Select, annotate and copy a screenshot in one native screen overlay."""
 import copy,math
 from PySide6.QtCore import QPointF,QRectF,Qt,Signal,QSize
-from PySide6.QtGui import QColor,QPainter,QPen,QFont,QShortcut,QKeySequence
-from PySide6.QtWidgets import QWidget,QPushButton,QHBoxLayout,QVBoxLayout,QFrame,QButtonGroup,QLabel,QSpinBox,QComboBox
+from PySide6.QtGui import QColor,QCursor,QPainter,QPen,QFont,QShortcut,QKeySequence
+from PySide6.QtWidgets import QApplication,QWidget,QPushButton,QHBoxLayout,QVBoxLayout,QFrame,QButtonGroup,QLabel,QSpinBox,QComboBox
 from .capture_pixels import crop_selection, pixel_scale, selection_pixels
-from .presentation import line_icon
+from .capture_icons import line_icon
 from .inline_capture import InlineAnnotationCanvas
 from .capture_tools import COLORS,normalize_tools
 from .video_audio import normalize_audio_mode, audio_label
@@ -15,6 +15,9 @@ from .capture_material import (CaptureGlassPanel, PANEL_STYLE, SELECTION_COLOR,
 class SelectionOverlay(QWidget):
     selected=Signal(object)
     save_selected=Signal(object)
+    pin_selected=Signal(object)
+    beautify_selected=Signal(object)
+    color_picked=Signal(str)
     video_selected=Signal(object)
     long_selected=Signal(object)
     mode_changed=Signal(str)
@@ -23,9 +26,9 @@ class SelectionOverlay(QWidget):
     preferences_changed=Signal(object)
     def __init__(self,screen,image,preferences=None):
         super().__init__(None,Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint|Qt.WindowType.Tool)
-        self.screen_ref,self.image=screen,image;self.start=self.end=None;self.drag=None;self.origin=None;self.press=None
+        self.screen_ref,self.image=screen,image;self.start=self.end=None;self.drag=None;self.origin=None;self.press=None;self.hover_pos=None
         self.setCursor(Qt.CursorShape.CrossCursor);self.setMouseTracking(True)
-        self.setWindowTitle('DocumentAssistant · 框选截图');self.setGeometry(screen.geometry())
+        self.setWindowTitle('SnapFlow · 框选截图');self.setGeometry(screen.geometry())
         self.mode='photo';self.stop_key='Alt+S';self.selection_locked=False
         self.long_submitted=False
         self.video_audio_mode='silent'
@@ -59,7 +62,9 @@ class SelectionOverlay(QWidget):
         self.style_groups=[];self.option_groups={}
         self.photo_controls=[];self.tool_buttons={};self.tool_group=QButtonGroup(self)
         for key,title,icon in [('view','调整选区','capture'),('select','选择 / 移动标注','cursor'),
-                              ('pen','画笔 · 按住拖动自由绘画','pen'),('rectangle','矩形','rectangle'),('arrow','箭头','arrow'),('text','文字','text'),('mask','马赛克 · 按住拖动自由涂抹','mask')]:
+                              ('pen','画笔 · 按住拖动自由绘画','pen'),('highlighter','荧光笔 · 半透明高亮标记','highlighter'),
+                              ('rectangle','矩形','rectangle'),('arrow','箭头','arrow'),('text','文字','text'),
+                              ('step','序号 · 点击依次标注 ①②③','step'),('mask','马赛克 · 按住拖动自由涂抹','mask')]:
             button=QPushButton();button.setFixedSize(34,34);button.setCheckable(True)
             button.setToolTip(title);button.setAccessibleName(title);button.setIcon(line_icon(icon,ICON_COLOR));button.setIconSize(QSize(21,21))
             button.clicked.connect(lambda checked=False,value=key:self.set_tool(value))
@@ -92,6 +97,12 @@ class SelectionOverlay(QWidget):
             button=QPushButton();button.setFixedSize(34,34);button.setIcon(line_icon(icon,ICON_COLOR));button.setIconSize(QSize(21,21))
             button.setToolTip(title+' · '+('Ctrl+Z' if icon=='undo' else 'Ctrl+Y'));button.setAccessibleName(title)
             button.clicked.connect(handler);self.action_layout.addWidget(button);self.photo_controls.append(button);setattr(self,attr,button)
+        self.pin_button=QPushButton();self.pin_button.setFixedSize(34,34);self.pin_button.setIcon(line_icon('pin',ICON_COLOR));self.pin_button.setIconSize(QSize(20,20))
+        self.pin_button.setToolTip('贴图 · 置顶悬浮在桌面');self.pin_button.setAccessibleName('贴到屏幕')
+        self.pin_button.clicked.connect(self.pin);self.action_layout.addWidget(self.pin_button);self.photo_controls.append(self.pin_button)
+        self.beautify_button=QPushButton();self.beautify_button.setFixedSize(34,34);self.beautify_button.setIcon(line_icon('sparkle',ICON_COLOR));self.beautify_button.setIconSize(QSize(20,20))
+        self.beautify_button.setToolTip('美化套壳 · 渐变背景与圆角阴影');self.beautify_button.setAccessibleName('美化套壳')
+        self.beautify_button.clicked.connect(self.beautify);self.action_layout.addWidget(self.beautify_button);self.photo_controls.append(self.beautify_button)
         self.save_button=QPushButton('保存到桌面');self.save_button.setToolTip('保存 PNG，并复制到剪贴板')
         self.save_label='保存到桌面'
         self.save_button.setFixedHeight(34)
@@ -178,7 +189,7 @@ class SelectionOverlay(QWidget):
         if self._modes_stacked:
             self.toolbar_layout.removeWidget(self.modes)
             self.action_layout.insertWidget(self.action_layout.indexOf(self.cancel_button),self.modes);self._modes_stacked=False
-        icons=[*self.tool_buttons.values(),self.undo_button,self.redo_button,self.cancel_button]
+        icons=[*self.tool_buttons.values(),self.undo_button,self.redo_button,self.pin_button,self.beautify_button,self.cancel_button]
         for button in icons:button.setFixedSize(34,34)
         for button in self.color_buttons:button.setFixedSize(22,22)
         for caption,title,spin in self.style_groups:caption.setText(title);spin.setFixedWidth(54)
@@ -194,10 +205,10 @@ class SelectionOverlay(QWidget):
             self.toolbar_layout.addWidget(self.modes,0,Qt.AlignmentFlag.AlignRight);self._modes_stacked=True
             self.action_layout.invalidate()
         if self.action_layout.sizeHint().width()+padding>available:
-            for button in icons:button.setFixedSize(24,34)
-            for button in self.color_buttons:button.setFixedSize(16,16)
-            for caption,title,spin in self.style_groups:caption.setText(title[0]);spin.setFixedWidth(36)
-            self.action_layout.setSpacing(2)
+            for button in icons:button.setFixedSize(22,34)
+            for button in self.color_buttons:button.setFixedSize(15,15)
+            for caption,title,spin in self.style_groups:caption.setText(title[0]);spin.setFixedWidth(34)
+            self.action_layout.setSpacing(1)
             self.save_button.setText('保存')
             if self.mode=='photo':self.confirm_button.setText('复制')
             self.action_layout.invalidate()
@@ -237,8 +248,8 @@ class SelectionOverlay(QWidget):
         if not hasattr(self,'block_spin'):return
         kind=self.effective_tool();photo=self.mode=='photo' and self.start is not None
         for widget in self.photo_controls:widget.setVisible(photo)
-        for button in self.color_buttons:button.setVisible(photo and kind in ('pen','rectangle','arrow','text'))
-        visible={'width_spin':kind in ('pen','rectangle','arrow'),'size_spin':kind=='text',
+        for button in self.color_buttons:button.setVisible(photo and kind in ('pen','highlighter','rectangle','arrow','text','step'))
+        visible={'width_spin':kind in ('pen','highlighter','rectangle','arrow'),'size_spin':kind in ('text','step'),
                  'brush_spin':kind=='mask','block_spin':kind=='mask'}
         for attr,group in self.option_groups.items():group.setVisible(photo and visible[attr])
         values=dict(self.tool_preferences.get(kind,{}))
@@ -326,7 +337,73 @@ class SelectionOverlay(QWidget):
             p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(17,36,53,235));p.drawRoundedRect(badge,8,8)
             p.setPen(QColor('#e5f5ff'));p.drawText(badge,Qt.AlignmentFlag.AlignCenter,text)
         paint_panel_shadows(p,(self.actions,))
+        if self.start is None and self.hover_pos is not None and not (self.actions.isVisible() and self.actions.geometry().contains(self.hover_pos.toPoint())):
+            self._paint_eyedropper(p, self.hover_pos)
         p.end()
+
+    def sample_color(self, pos=None):
+        point = pos if pos is not None else self.hover_pos
+        if point is None or self.image.isNull():
+            return None
+        sx, sy = pixel_scale(self.image, self.size())
+        px = max(0, min(self.image.width() - 1, int(point.x() * sx)))
+        py = max(0, min(self.image.height() - 1, int(point.y() * sy)))
+        return self.image.pixelColor(px, py)
+
+    def _paint_eyedropper(self, p, pos):
+        sx, sy = pixel_scale(self.image, self.size())
+        px = max(0, min(self.image.width() - 1, int(pos.x() * sx)))
+        py = max(0, min(self.image.height() - 1, int(pos.y() * sy)))
+        color = self.image.pixelColor(px, py)
+        hex_text = color.name(QColor.NameFormat.HexRgb).upper()
+
+        box_w, box_h = 122, 146
+        x = pos.x() + 18
+        y = pos.y() + 18
+        if x + box_w > self.width() - 8:
+            x = pos.x() - box_w - 14
+        if y + box_h > self.height() - 8:
+            y = pos.y() - box_h - 14
+        x = max(8, x)
+        y = max(8, y)
+
+        box = QRectF(x, y, box_w, box_h)
+        p.setPen(QPen(QColor(155, 205, 242, 70), 1))
+        p.setBrush(QColor(14, 22, 36, 232))
+        p.drawRoundedRect(box, 10, 10)
+
+        cell = 14
+        grid_x = x + (box_w - cell * 7) / 2
+        grid_y = y + 9
+        for dy in range(-3, 4):
+            for dx in range(-3, 4):
+                sx_i = max(0, min(self.image.width() - 1, px + dx))
+                sy_i = max(0, min(self.image.height() - 1, py + dy))
+                p.setPen(QPen(QColor(255, 255, 255, 20), 0.5))
+                p.setBrush(self.image.pixelColor(sx_i, sy_i))
+                p.drawRect(QRectF(grid_x + (dx + 3) * cell, grid_y + (dy + 3) * cell, cell, cell))
+
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor('#7dd3fc'), 1.8))
+        p.drawRect(QRectF(grid_x + 3 * cell, grid_y + 3 * cell, cell, cell))
+
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawEllipse(QPointF(x + 17, grid_y + cell * 7 + 14), 6, 6)
+
+        font = QFont('Microsoft YaHei UI')
+        font.setPixelSize(11)
+        font.setBold(True)
+        p.setFont(font)
+        p.setPen(QColor('#f0f6fc'))
+        p.drawText(QRectF(x + 28, grid_y + cell * 7 + 5, box_w - 34, 18), Qt.AlignmentFlag.AlignVCenter, hex_text)
+
+        font.setBold(False)
+        font.setPixelSize(10)
+        p.setFont(font)
+        p.setPen(QColor('#9bb2c9'))
+        p.drawText(QRectF(x + 10, grid_y + cell * 7 + 23, box_w - 20, 15), Qt.AlignmentFlag.AlignCenter, '按 C 复制色值')
+
     def mousePressEvent(self,event):
         if event.button()==Qt.MouseButton.RightButton:self.cancelled.emit();return
         if self.selection_locked:return
@@ -335,6 +412,7 @@ class SelectionOverlay(QWidget):
 
     def begin_drag(self,point):
         if self.selection_locked:return
+        self.hover_pos=None
         if self.canvas:self.canvas.finish_text()
         self.press=point;self.origin=self.selection_rect();self.drag='new'
         if self.start is not None:
@@ -345,8 +423,17 @@ class SelectionOverlay(QWidget):
         self.actions.hide();self.update()
     def mouseMoveEvent(self,event):
         if self.selection_locked:return
-        if self.drag is None:return
+        if self.drag is None:
+            if self.start is None:
+                self.hover_pos=event.position();self.update()
+            elif self.hover_pos is not None:
+                self.hover_pos=None;self.update()
+            return
         self.move_drag(event.position())
+    def leaveEvent(self,event):
+        if self.hover_pos is not None:
+            self.hover_pos=None;self.update()
+        super().leaveEvent(event)
 
     def move_drag(self,position):
         if self.selection_locked or self.drag is None:return
@@ -386,6 +473,18 @@ class SelectionOverlay(QWidget):
         if self.mode=='photo' and not self.selection_locked and self.start is not None:
             self.save_selected.emit(self.rendered())
 
+    def pin(self):
+        if self.mode=='photo' and not self.selection_locked and self.start is not None:
+            try:image=self.rendered()
+            except ValueError:return
+            self.pin_selected.emit(image)
+
+    def beautify(self):
+        if self.mode=='photo' and not self.selection_locked and self.start is not None:
+            try:image=self.rendered()
+            except ValueError:return
+            self.beautify_selected.emit(image)
+
     def confirm(self,keyboard=False):
         if self.selection_locked:return
         if self.start is None:return
@@ -407,5 +506,15 @@ class SelectionOverlay(QWidget):
         self.selected.emit(image)
     def keyPressEvent(self,event):
         if event.key()==Qt.Key.Key_Escape:self.cancelled.emit()
+        elif event.key()==Qt.Key.Key_C and self.start is None:
+            pos=self.hover_pos
+            if pos is None:
+                local=QPointF(self.mapFromGlobal(QCursor.pos()))
+                if QRectF(self.rect()).contains(local):pos=local
+            color=self.sample_color(pos)
+            if color is not None:
+                hex_code=color.name(QColor.NameFormat.HexRgb).upper()
+                QApplication.clipboard().setText(hex_code)
+                self.color_picked.emit(hex_code)
         elif event.key() in (Qt.Key.Key_Return,Qt.Key.Key_Enter):self.confirm()
         elif event.key() in (Qt.Key.Key_Delete,Qt.Key.Key_Backspace) and self.canvas:self.canvas.delete_selected()

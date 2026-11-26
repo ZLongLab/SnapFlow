@@ -26,7 +26,7 @@ class RecordingControls(QWidget):
     cancel_requested=Signal()
     def __init__(self,hotkey,audio_mode='silent'):
         super().__init__(None,Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint)
-        self.setWindowTitle('视频录制 · DocumentAssistant');self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setWindowTitle('视频录制 · SnapFlow');self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setStyleSheet('QWidget{background:#172a3b;color:#e8f2fa;font-family:"Microsoft YaHei UI";font-size:13px;border-radius:13px;} QLabel#recordClock{font-size:18px;font-weight:600;} QPushButton{background:#e36b5c;color:#fff;border:0;border-radius:9px;padding:9px 15px;font-weight:600;} QPushButton:disabled{background:#2b4457;color:#93adbf;}')
         layout=QHBoxLayout(self);layout.setContentsMargins(16,12,12,12);layout.setSpacing(14)
         self.clock=QLabel('3 秒后开始');self.clock.setObjectName('recordClock');layout.addWidget(self.clock)
@@ -69,7 +69,7 @@ class VideoPreview(QDialog):
         super().__init__(None)
         self.path=Path(path);self.controller=controller;self.saved_path=None
         self.audio_mode=normalize_audio_mode(audio_mode)
-        self.setWindowTitle('视频预览 · DocumentAssistant');self.resize(900,650);self.setMinimumSize(560,420)
+        self.setWindowTitle('视频预览 · SnapFlow');self.resize(900,650);self.setMinimumSize(560,420)
         self.setStyleSheet(CAPTURE_QSS)
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0);layout.setSpacing(12)
         header=QFrame();header.setObjectName('captureHeader');row=QHBoxLayout(header);row.setContentsMargins(22,18,22,18)

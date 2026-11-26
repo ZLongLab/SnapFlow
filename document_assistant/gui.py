@@ -1,1003 +1,1040 @@
+"""SnapFlow visual gallery studio with Mist Light & Slate Dark rounded-box themes."""
 from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEvent, QLibraryInfo, QThread, QTimer, QTranslator, QUrl, Qt, Signal
-from PySide6.QtGui import QDesktopServices, QColor, QIcon, QKeySequence, QShortcut
+from PySide6.QtCore import (
+    QCoreApplication,
+    QEvent,
+    QLibraryInfo,
+    QPointF,
+    QRectF,
+    QStandardPaths,
+    QTimer,
+    QTranslator,
+    QUrl,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QFont,
+    QIcon,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QRadialGradient,
+)
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QFormLayout, QHeaderView, QLabel, QMainWindow,
-    QMessageBox, QPlainTextEdit, QPushButton,
-    QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea, QWidget,
+    QApplication,
+    QButtonGroup,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .rules import CATEGORIES, DEFAULT_RULES, classify, load_rules, save_rules, validate_rules
-from .service import EXTENSIONS, PROJECT_ROOT, archive_batch, scan_files, scan_folder, validate_library, within
-from .storage import Catalog, archive_file_state
-from .presentation import GLYPH, SUBTEXT, SUCCESS, WARNING, HintTable
-from .windows_identity import ICON_PATH, configure_process, tag_window
 from . import __version__
-from .workflow_ui import WorkflowActions
-from .search_ui import SearchActions
-from .knowledge_ui import KnowledgeActions
-from .document_metadata import attention_rank
-from .rules import categories_for
-from .presentation import MATCH_TERMS
-from .organization import query_terms
-from .paths import comparison_path, filesystem_path
+from .capture_icons import line_icon
+from .startup_registration import StartupRegistration
+from .windows_identity import ICON_PATH, apply_titlebar_theme, configure_process, tag_window
+
+
+def _build_qss(theme_name: str) -> str:
+    dark = theme_name == "dark"
+    if dark:
+        t = {
+            "bg": "#131926",
+            "text": "#eef5fc",
+            "muted": "#94a7c0",
+            "bar_bg": "#1a2233",
+            "bar_border": "#2b3850",
+            "card_bg": "#1c2537",
+            "card_hover": "#212c42",
+            "card_border": "#2d3b54",
+            "card_hover_border": "#60a5fa",
+            "btn_bg": "#232e44",
+            "btn_border": "#33435e",
+            "btn_hover": "#2a3853",
+            "btn_hover_border": "#60a5fa",
+            "btn_text": "#e4eef8",
+            "seg_bg": "#131926",
+            "seg_active": "#26344d",
+            "seg_active_border": "#4c72a8",
+            "seg_active_text": "#ffffff",
+            "badge_bg": "#202e47",
+            "badge_border": "#38527d",
+            "badge_text": "#93c5fd",
+            "inactive_bg": "#362717",
+            "inactive_border": "#7c5124",
+            "inactive_text": "#fbbf24",
+            "startup_bg": "#14302a",
+            "startup_border": "#1f6f58",
+            "empty_bg": "#172031",
+            "empty_border": "#31415c",
+            "scroll": "rgba(148, 167, 192, 70)",
+            "status_bg": "#101521",
+            "status_border": "#232e42",
+            "tip_bg": "#1f293d",
+            "tip_border": "#475d80",
+        }
+    else:
+        t = {
+            "bg": "#f3f6fb",
+            "text": "#0f172a",
+            "muted": "#64748b",
+            "bar_bg": "#ffffff",
+            "bar_border": "#dce5f2",
+            "card_bg": "#ffffff",
+            "card_hover": "#ffffff",
+            "card_border": "#dce5f2",
+            "card_hover_border": "#60a5fa",
+            "btn_bg": "#f8fafd",
+            "btn_border": "#d6e0ee",
+            "btn_hover": "#eff6ff",
+            "btn_hover_border": "#60a5fa",
+            "btn_text": "#1e293b",
+            "seg_bg": "#eef3f9",
+            "seg_active": "#ffffff",
+            "seg_active_border": "#bfdbfe",
+            "seg_active_text": "#2563eb",
+            "badge_bg": "#eff6ff",
+            "badge_border": "#bfdbfe",
+            "badge_text": "#2563eb",
+            "inactive_bg": "#fff7ed",
+            "inactive_border": "#fdba74",
+            "inactive_text": "#c2410c",
+            "startup_bg": "#ecfdf5",
+            "startup_border": "#6ee7b7",
+            "empty_bg": "#ffffff",
+            "empty_border": "#cfdbe9",
+            "scroll": "rgba(100, 116, 139, 75)",
+            "status_bg": "#ebf0f7",
+            "status_border": "#dce5f2",
+            "tip_bg": "#0f172a",
+            "tip_border": "#334155",
+        }
+
+    return f"""
+QMainWindow {{ background:{t['bg']}; }}
+QWidget {{ font-family:'Microsoft YaHei UI'; font-size:13px; color:{t['text']}; }}
+QWidget#backdropRoot, QWidget#galleryGridHost, QWidget#cardFooter {{ background:transparent; }}
+QScrollArea#galleryScroll {{ border:0; background:transparent; }}
+QScrollArea#galleryScroll > QWidget > QWidget {{ background:transparent; }}
+QScrollBar:vertical {{ width:8px; background:transparent; margin:2px; }}
+QScrollBar::handle:vertical {{ background:{t['scroll']}; border-radius:4px; min-height:28px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
+
+QFrame#commandBar {{
+    background-color:{t['bar_bg']}; border:1px solid {t['bar_border']}; border-radius:16px;
+}}
+QLabel#brandName {{ font-size:15px; font-weight:700; color:{t['text']}; background:transparent; }}
+
+QPushButton#hotkeyBadge {{
+    font-size:11px; font-weight:600; color:{t['badge_text']};
+    background-color:{t['badge_bg']}; border:1px solid {t['badge_border']};
+    border-radius:8px; padding:4px 10px;
+}}
+QPushButton#hotkeyBadge:hover {{ border-color:#60a5fa; }}
+QPushButton#hotkeyBadge[inactive="true"] {{
+    color:{t['inactive_text']}; background-color:{t['inactive_bg']}; border-color:{t['inactive_border']};
+}}
+
+QPushButton#primaryBtn {{
+    background-color:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #3b82f6, stop:1 #2563eb);
+    color:#ffffff; border:1px solid #2563eb; border-radius:11px;
+    padding:7px 17px; font-size:13px; font-weight:700; min-height:20px;
+}}
+QPushButton#primaryBtn:hover {{
+    background-color:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #60a5fa, stop:1 #3b82f6);
+    border-color:#60a5fa;
+}}
+QPushButton#primaryBtn:pressed {{ background-color:#1d4ed8; border-color:#1d4ed8; }}
+
+QPushButton#dockBtn {{
+    background-color:{t['btn_bg']}; color:{t['btn_text']};
+    border:1px solid {t['btn_border']}; border-radius:11px;
+    padding:7px 14px; font-size:12px; font-weight:600; min-height:20px;
+}}
+QPushButton#dockBtn:hover {{ background-color:{t['btn_hover']}; border-color:{t['btn_hover_border']}; }}
+
+QFrame#audioBox {{
+    background-color:{t['seg_bg']}; border:1px solid {t['bar_border']}; border-radius:11px;
+}}
+QPushButton#audioSeg {{
+    background-color:transparent; color:{t['muted']}; border:1px solid transparent; border-radius:8px;
+    padding:4px 11px; font-size:12px; font-weight:500;
+}}
+QPushButton#audioSeg:hover {{ color:{t['text']}; }}
+QPushButton#audioSeg:checked {{
+    background-color:{t['seg_active']}; border-color:{t['seg_active_border']};
+    color:{t['seg_active_text']}; font-weight:700;
+}}
+
+QPushButton#iconBtn {{
+    background-color:{t['btn_bg']}; border:1px solid {t['btn_border']};
+    border-radius:10px; padding:0;
+}}
+QPushButton#iconBtn:hover {{ background-color:{t['btn_hover']}; border-color:{t['btn_hover_border']}; }}
+QPushButton#iconBtn[active="true"] {{
+    background-color:{t['startup_bg']}; border-color:{t['startup_border']};
+}}
+
+QFrame#filterBox {{
+    background-color:{t['seg_bg']}; border:1px solid {t['bar_border']}; border-radius:11px;
+}}
+QPushButton#filterTab {{
+    background-color:transparent; color:{t['muted']}; border:1px solid transparent; border-radius:8px;
+    padding:4px 12px; font-size:12px; font-weight:500;
+}}
+QPushButton#filterTab:hover {{ color:{t['text']}; }}
+QPushButton#filterTab:checked {{
+    background-color:{t['seg_active']}; border-color:{t['seg_active_border']};
+    color:{t['seg_active_text']}; font-weight:700;
+}}
+
+QLabel#countLabel {{ font-size:12px; color:{t['muted']}; background:transparent; }}
+QPushButton#subtleBoxBtn {{
+    background-color:{t['bar_bg']}; color:{t['btn_text']};
+    border:1px solid {t['btn_border']}; border-radius:10px; padding:5px 12px; font-size:12px; font-weight:500;
+}}
+QPushButton#subtleBoxBtn:hover {{ background-color:{t['btn_hover']}; border-color:{t['btn_hover_border']}; }}
+
+QFrame#galleryCard {{
+    background-color:{t['card_bg']}; border:1px solid {t['card_border']}; border-radius:16px;
+}}
+QFrame#galleryCard:hover {{
+    background-color:{t['card_hover']}; border-color:{t['card_hover_border']};
+}}
+QLabel#cardTitle {{ font-size:12px; font-weight:700; color:{t['text']}; background:transparent; }}
+QLabel#cardTime {{ font-size:11px; color:{t['muted']}; background:transparent; }}
+QPushButton#cardAction {{
+    background-color:{t['btn_bg']}; color:{t['btn_text']};
+    border:1px solid {t['btn_border']}; border-radius:8px;
+    padding:4px 8px; font-size:11px; font-weight:600;
+}}
+QPushButton#cardAction:hover {{ background-color:{t['btn_hover']}; border-color:{t['btn_hover_border']}; color:{t['seg_active_text']}; }}
+
+QFrame#emptyCard {{
+    background-color:{t['empty_bg']}; border:1.5px dashed {t['empty_border']}; border-radius:18px;
+}}
+QLabel#emptyTitle {{ font-size:18px; font-weight:700; color:{t['text']}; background:transparent; }}
+QLabel#emptySub {{ font-size:13px; color:{t['muted']}; background:transparent; }}
+QPushButton#featureTileBlue {{
+    background-color:{'rgba(59,130,246,34)' if dark else '#eff6ff'}; color:{'#93c5fd' if dark else '#1d4ed8'};
+    border:1px solid {'rgba(96,165,250,70)' if dark else '#bfdbfe'}; border-radius:12px; padding:9px 14px; font-size:12px; font-weight:600;
+}}
+QPushButton#featureTileGreen {{
+    background-color:{'rgba(16,185,129,30)' if dark else '#ecfdf5'}; color:{'#6ee7b7' if dark else '#047857'};
+    border:1px solid {'rgba(52,211,153,65)' if dark else '#a7f3d0'}; border-radius:12px; padding:9px 14px; font-size:12px; font-weight:600;
+}}
+QPushButton#featureTileViolet {{
+    background-color:{'rgba(139,92,246,34)' if dark else '#f5f3ff'}; color:{'#c4b5fd' if dark else '#6d28d9'};
+    border:1px solid {'rgba(167,139,250,70)' if dark else '#ddd6fe'}; border-radius:12px; padding:9px 14px; font-size:12px; font-weight:600;
+}}
+QPushButton#featureTileAmber {{
+    background-color:{'rgba(245,158,11,30)' if dark else '#fffbeb'}; color:{'#fcd34d' if dark else '#b45309'};
+    border:1px solid {'rgba(251,191,36,65)' if dark else '#fde68a'}; border-radius:12px; padding:9px 14px; font-size:12px; font-weight:600;
+}}
+QPushButton#featureTileBlue:hover, QPushButton#featureTileGreen:hover, QPushButton#featureTileViolet:hover, QPushButton#featureTileAmber:hover {{
+    border-color:#60a5fa;
+}}
+
+QStatusBar {{ background:{t['status_bg']}; color:{t['muted']}; border-top:1px solid {t['status_border']}; font-size:12px; }}
+QToolTip {{ background:{t['tip_bg']}; color:#f8fafc; border:1px solid {t['tip_border']}; padding:6px 9px; border-radius:8px; }}
+"""
 
 
 def runtime_directory() -> Path:
-    return Path(os.environ.get("DOCUMENTASSISTANT_HOME", str(PROJECT_ROOT.parent / "DocumentAssistant-local"))).resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    return Path(
+        os.environ.get("DOCUMENTASSISTANT_HOME", str(project_root.parent / "DocumentAssistant-local"))
+    ).resolve()
 
 
-class Worker(QThread):
-    progress = Signal(int, int, str)
-    completed = Signal(object)
-    failed = Signal(str)
+def _format_size(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
 
-    def __init__(self, operation, parent):
+
+class StudioBackdrop(QWidget):
+    """Soft Mist Light or Slate Dark gradient backdrop with gentle top ambient wash."""
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.operation = operation
+        self.dark = False
 
-    def run(self):
-        try:
-            result = self.operation(self.progress.emit, self.isInterruptionRequested)
-            self.completed.emit(result)
-        except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
 
-
-class RuleDialog(QDialog):
-    def __init__(self, rules, parent):
-        super().__init__(parent)
-        self.setWindowTitle("配置分类规则")
-        available = QApplication.primaryScreen().availableGeometry()
-        self.resize(700, min(760, available.height() - 64))
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("每行填写一个关键词。较长的完整词组优先，文件名、标题和正文共同判断。\n零散通用词不单独定类；自动识别论文/实验结构并忽略参考文献列表。\n得分不足或类型冲突时保留待整理；清空某类关键词可停用该类建议。"))
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        scroll.setWidget(content)
-        form = QFormLayout(content)
-        self.editors = {}
-        for category in categories_for(rules)[:-1]:
-            editor = QPlainTextEdit()
-            editor.setMaximumHeight(80)
-            editor.setPlaceholderText("每行一个关键词")
-            self.editors[category] = editor
-            form.addRow(category, editor)
-        self.weights = {}
-        for field, label in (("filename_weight", "文件名命中得分"),
-                             ("title_weight", "正文标题命中得分"),
-                             ("body_weight", "正文命中得分"), ("minimum_score", "最低分类分数"),
-                             ("minimum_margin", "前两类最低分差")):
-            spin = QSpinBox()
-            spin.setRange(1, 100)
-            self.weights[field] = spin
-            form.addRow(label, spin)
-        layout.addWidget(scroll, 1)
-        self.populate(rules)
-        reset = QPushButton("恢复默认规则")
-        reset.clicked.connect(lambda: self.populate(DEFAULT_RULES))
-        layout.addWidget(reset)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        buttons.accepted.connect(self.validate)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def populate(self, rules):
-        for category, editor in self.editors.items():
-            editor.setPlainText("\n".join(rules["keywords"].get(category,[])))
-        for field, spin in self.weights.items():
-            spin.setValue(rules[field])
-
-    def validate(self):
-        try:
-            rules = {field: spin.value() for field, spin in self.weights.items()}
-            rules['schema_version'] = DEFAULT_RULES['schema_version']
-            rules["keywords"] = {category: [word.strip() for word in editor.toPlainText().splitlines() if word.strip()]
-                                 for category, editor in self.editors.items()}
-            self.rules = validate_rules(rules)
-        except (ValueError, TypeError) as exc:
-            QMessageBox.warning(self, "规则格式有误", str(exc))
-            return
-        self.accept()
-
-
-def table(headers):
-    widget = HintTable(0, len(headers))
-    widget.setHorizontalHeaderLabels(headers)
-    widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-    widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-    widget.setAlternatingRowColors(True)
-    widget.verticalHeader().hide()
-    widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-    widget.horizontalHeader().setStretchLastSection(True)
-    widget.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    widget.setWordWrap(False)
-    return widget
-
-
-class MainWindow(KnowledgeActions, SearchActions, WorkflowActions, QMainWindow):
-    def __init__(self, home: Path | None = None):
-        super().__init__()
-        self.setWindowTitle(f"DocumentAssistant · 卡片工作台 · {__version__}")
-        self.home = home or runtime_directory()
-        self.home.mkdir(parents=True, exist_ok=True)
-        self.rules_path = self.home / "rules.json"
-        self.settings_path = self.home / "settings.json"
-        self.startup_errors = []
-        try:
-            if not self.rules_path.exists():
-                save_rules(self.rules_path, DEFAULT_RULES)
-            self.rules = load_rules(self.rules_path)
-        except Exception as exc:
-            self.rules = DEFAULT_RULES
-            self.startup_errors.append(f"规则读取失败，暂用默认规则：{exc}")
-        try:
-            self.settings = json.loads(self.settings_path.read_text(encoding="utf-8")) if self.settings_path.exists() else {}
-            if not isinstance(self.settings, dict):
-                raise ValueError("设置必须是对象")
-        except Exception as exc:
-            self.settings = {}
-            self.startup_errors.append(f"设置读取失败：{exc}")
-        self.capture_controller=None
-        self.init_knowledge()
-        self.load_organization()
-        self.items = self.load_loose_queue()
-        self.archive_statuses = {}
-        self.worker = None
-        self.catalog = None
-        self.archive_rows = []
-        self.search_page = 0
-        self.search_total = 0
-        self.search_worker = None
-        self.pending_search = None
-        self.search_generation = 0
-        self.closing = False
-        self.page_size = 100
-        self.review_mode = self.settings.get('view','cards')
-        if self.review_mode not in ('cards','list'):
-            self.review_mode = 'cards'
-        self.search_timer = QTimer(self)
-        self.search_timer.setSingleShot(True)
-        self.search_timer.setInterval(200)
-        self.search_timer.timeout.connect(self.refresh_search)
-        self.setAcceptDrops(True)
-        self.build_ui()
-        self.find_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)
-        self.find_shortcut.activated.connect(self.focus_library_search)
-        self.refresh_shortcut = QShortcut(QKeySequence('F5'), self)
-        self.refresh_shortcut.activated.connect(self.refresh_library)
-        self.search_button.setToolTip('搜索文档；F5 刷新当前结果及文件状态')
-        self.search_edit.setToolTip('搜索已归档文件；Ctrl+F 快速进入搜索并选中现有关键词')
-        from .window_chrome import WindowChrome
-        self.window_chrome=WindowChrome(self,self.settings.get('theme','ocean'))
-        self.populate_scan({str(item.path):item.selected for item in self.items})
-        self.restore_paths()
-        self.update_controls()
-        if self.startup_errors:
-            self.detail.setPlainText("\n".join(self.startup_errors))
-            self.statusBar().showMessage("配置有问题，请点击文件详情查看")
-            self.details_button.setEnabled(True)
-
-    def build_ui(self):
-        from .layout_minimal import build_minimal_window, selected_layout
-        self.layout_variant = selected_layout(self.home)
-        if self.layout_variant == 'classic':
-            from .layout import build_window
-            build_window(self)
+        bg = QLinearGradient(0, 0, 0, h)
+        if self.dark:
+            bg.setColorAt(0.0, QColor("#131926"))
+            bg.setColorAt(1.0, QColor("#182032"))
+            washes = (
+                (w * 0.20, 0.0, max(w, h) * 0.55, QColor(59, 130, 246, 36)),
+                (w * 0.80, h * 0.06, max(w, h) * 0.48, QColor(139, 92, 246, 26)),
+            )
         else:
-            build_minimal_window(self)
-            self.setWindowTitle(f"DocumentAssistant · 星空工作台 · {__version__}")
+            bg.setColorAt(0.0, QColor("#f4f7fc"))
+            bg.setColorAt(1.0, QColor("#e9eff8"))
+            washes = (
+                (w * 0.18, 0.0, max(w, h) * 0.55, QColor(147, 197, 253, 55)),
+                (w * 0.82, h * 0.05, max(w, h) * 0.50, QColor(196, 181, 253, 45)),
+            )
+        p.fillRect(self.rect(), bg)
 
-    def restore_paths(self):
-        source = self.settings.get("source", "")
-        library = self.settings.get("library", "")
-        if isinstance(source, str) and source and Path(source).is_dir():
-            self.source_edit.setText(source)
-        if isinstance(library, str) and library and Path(library).is_dir():
-            try:
-                self.set_library(Path(library))
-                self.tabs.setCurrentIndex(0 if self.items else 1)
-            except Exception as exc:
-                self.startup_errors.append(f"文档库读取失败：{exc}")
+        for cx, cy, rad, color in washes:
+            glow = QRadialGradient(QPointF(cx, cy), rad)
+            glow.setColorAt(0.0, color)
+            glow.setColorAt(1.0, QColor(0, 0, 0, 0))
+            p.fillRect(self.rect(), glow)
+        p.end()
 
-    def save_settings(self):
-        data = {
-            "source": self.source_edit.text(),
-            "library": self.library_edit.text(),
-            "view": self.review_mode,
-            "review_order": self.review_order,
-            "theme": self.settings.get("theme", "ocean"),
-            "design_revision": self.settings.get("design_revision", "starry-v1"),
-        }
+
+class ThumbnailCanvas(QWidget):
+    """Clickable visual thumbnail preview for PNG screenshots and MP4 recordings."""
+
+    clicked = Signal()
+
+    def __init__(self, path: Path, is_video: bool, size_bytes: int, dark: bool, parent=None):
+        super().__init__(parent)
+        self.path = path
+        self.is_video = is_video
+        self.size_bytes = size_bytes
+        self.dark = dark
+        self.pixmap = None
+        self.dims_text = ""
+        self.setFixedHeight(148)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        if not is_video:
+            img = QImage(str(path))
+            if not img.isNull():
+                self.dims_text = f"{img.width()}×{img.height()}"
+                scaled = img.scaled(520, 280, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.pixmap = QPixmap.fromImage(scaled)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        rect = QRectF(self.rect())
+        clip = QPainterPath()
+        clip.moveTo(rect.left(), rect.bottom())
+        clip.lineTo(rect.left(), rect.top() + 15)
+        clip.quadTo(rect.left(), rect.top(), rect.left() + 15, rect.top())
+        clip.lineTo(rect.right() - 15, rect.top())
+        clip.quadTo(rect.right(), rect.top(), rect.right(), rect.top() + 15)
+        clip.lineTo(rect.right(), rect.bottom())
+        clip.closeSubpath()
+
+        p.save()
+        p.setClipPath(clip)
+
+        if self.is_video:
+            grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
+            if self.dark:
+                grad.setColorAt(0.0, QColor("#241b47"))
+                grad.setColorAt(1.0, QColor("#152544"))
+            else:
+                grad.setColorAt(0.0, QColor("#ede9fe"))
+                grad.setColorAt(1.0, QColor("#dbeafe"))
+            p.fillRect(rect, grad)
+
+            cx, cy = rect.center().x(), rect.center().y()
+            p.setPen(QPen(QColor("#8b5cf6") if not self.dark else QColor("#c4b5fd"), 1.5))
+            p.setBrush(QColor(139, 92, 246, 55 if self.dark else 36))
+            p.drawEllipse(QPointF(cx, cy), 22, 22)
+            icon_pm = line_icon("play", "#ffffff" if self.dark else "#6d28d9").pixmap(18, 18)
+            p.drawPixmap(int(cx - 8), int(cy - 9), icon_pm)
+
+            badge_text = f"MP4 · {_format_size(self.size_bytes)}"
+            badge_bg = QColor(109, 40, 217, 190)
+            badge_fg = QColor("#ffffff")
+        else:
+            p.fillRect(rect, QColor("#121826" if self.dark else "#edf2f9"))
+            if self.pixmap is not None and not self.pixmap.isNull():
+                inner = rect.adjusted(10, 10, -10, -10)
+                sz = self.pixmap.size().scaled(inner.size().toSize(), Qt.AspectRatioMode.KeepAspectRatio)
+                target = QRectF(inner.center().x() - sz.width() / 2, inner.center().y() - sz.height() / 2, sz.width(), sz.height())
+                p.drawPixmap(target.toRect(), self.pixmap)
+            else:
+                p.setPen(QColor("#64748b"))
+                p.drawText(rect, Qt.AlignmentFlag.AlignCenter, "无法预览图片")
+            badge_text = self.dims_text or "PNG"
+            badge_bg = QColor(15, 23, 42, 190) if self.dark else QColor(255, 255, 255, 225)
+            badge_fg = QColor("#f8fafc") if self.dark else QColor("#1e293b")
+
+        font = QFont("Microsoft YaHei UI")
+        font.setPixelSize(10)
+        font.setBold(True)
+        p.setFont(font)
+        tw = p.fontMetrics().horizontalAdvance(badge_text) + 14
+        pill = QRectF(rect.right() - tw - 10, rect.top() + 10, tw, 20)
+        p.setPen(QPen(QColor(255, 255, 255, 45) if self.dark else QColor(203, 213, 225, 190), 1))
+        p.setBrush(badge_bg)
+        p.drawRoundedRect(pill, 7, 7)
+        p.setPen(badge_fg)
+        p.drawText(pill, Qt.AlignmentFlag.AlignCenter, badge_text)
+
+        p.restore()
+        p.setPen(QPen(QColor("#2c3952" if self.dark else "#e2e8f0"), 1))
+        p.drawLine(QPointF(rect.left(), rect.bottom() - 0.5), QPointF(rect.right(), rect.bottom() - 0.5))
+        p.end()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
+class GalleryCard(QFrame):
+    """Rounded gallery card with thumbnail and 1-click quick actions."""
+
+    def __init__(self, path: Path, mtime: float, size_bytes: int, dark: bool, window: MainWindow, parent=None):
+        super().__init__(parent)
+        self.setObjectName("galleryCard")
+        is_video = path.suffix.lower() == ".mp4"
+        self.setMinimumWidth(220)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        thumb = ThumbnailCanvas(path, is_video, size_bytes, dark, self)
+        thumb.clicked.connect(lambda p=path: window.open_path(p))
+        layout.addWidget(thumb)
+
+        footer = QWidget(self)
+        footer.setObjectName("cardFooter")
+        f_layout = QVBoxLayout(footer)
+        f_layout.setContentsMargins(12, 9, 12, 11)
+        f_layout.setSpacing(8)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+        name_lbl = QLabel(path.name)
+        name_lbl.setObjectName("cardTitle")
+        name_lbl.setToolTip(str(path))
+        name_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        time_lbl = QLabel(datetime.fromtimestamp(mtime).strftime("%m-%d %H:%M"))
+        time_lbl.setObjectName("cardTime")
+        title_row.addWidget(name_lbl, 1)
+        title_row.addWidget(time_lbl)
+        f_layout.addLayout(title_row)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
+        if is_video:
+            for label, handler in (
+                ("播放", lambda p=path: window.open_path(p)),
+                ("所在目录", lambda p=path: window.open_path(p.parent)),
+            ):
+                btn = QPushButton(label)
+                btn.setObjectName("cardAction")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(handler)
+                actions.addWidget(btn)
+            actions.addStretch(1)
+        else:
+            for label, handler in (
+                ("复制", lambda p=path: window.copy_recent_image(p)),
+                ("贴图", lambda p=path: window.pin_recent_image(p)),
+                ("美化", lambda p=path: window.beautify_recent_image(p)),
+                ("标注", lambda p=path: window.edit_recent_image(p)),
+            ):
+                btn = QPushButton(label)
+                btn.setObjectName("cardAction")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(handler)
+                actions.addWidget(btn, 1)
+        f_layout.addLayout(actions)
+        layout.addWidget(footer)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, home=None):
+        super().__init__()
+        self.home = Path(home).resolve() if home else runtime_directory()
+        self.home.mkdir(parents=True, exist_ok=True)
+        self.closing = False
+        self.capture_controller = None
+        self._directory_path = Path()
+        self.current_filter = "all"
+        self._gallery_cards = []
+        self.empty_title = None
+        self.theme_name = self._load_theme()
+
+        self.setWindowTitle(f"SnapFlow · 轻截录屏 · {__version__}")
+        self.resize(980, 640)
+        self.setMinimumSize(780, 520)
+
+        self.backdrop = StudioBackdrop(self)
+        self.backdrop.setObjectName("backdropRoot")
+        root = QVBoxLayout(self.backdrop)
+        root.setContentsMargins(20, 16, 20, 10)
+        root.setSpacing(14)
+
+        root.addWidget(self._build_command_bar())
+        root.addLayout(self._build_filter_bar())
+        root.addWidget(self._build_gallery_area(), 1)
+
+        self.setCentralWidget(self.backdrop)
+        self.statusBar().setSizeGripEnabled(False)
+        self.statusBar().showMessage("托盘常驻 · 关闭窗口后快捷键保持生效")
+        self.apply_theme(self.theme_name, persist=False)
+
+    def _ui_path(self) -> Path:
+        return self.home / "ui.json"
+
+    def _load_theme(self) -> str:
         try:
-            temporary = self.settings_path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            temporary.replace(self.settings_path)
-            self.persist_review_selection()
-            self.save_loose_queue()
-        except OSError as exc:
-            self.statusBar().showMessage(f"设置保存失败：{exc}")
+            if self._ui_path().exists():
+                data = json.loads(self._ui_path().read_text(encoding="utf-8"))
+                if data.get("theme") in ("light", "dark"):
+                    return data["theme"]
+        except Exception:
+            pass
+        return "light"
+
+    def _save_theme(self, theme_name: str):
+        try:
+            tmp = self._ui_path().with_suffix(".tmp")
+            tmp.write_text(json.dumps({"theme": theme_name}, indent=2), encoding="utf-8")
+            tmp.replace(self._ui_path())
+        except OSError:
+            pass
 
     def toggle_theme(self):
-        from .layout import toggle_theme
-        toggle_theme(self)
+        next_theme = "dark" if self.theme_name == "light" else "light"
+        self.apply_theme(next_theme, persist=True)
 
-    def choose_source(self):
-        selected = QFileDialog.getExistingDirectory(self, "选择待整理文件夹", self.source_edit.text() or "D:/")
-        if selected:
-            if self.catalog and Path(selected).resolve().is_relative_to(self.catalog.library):
-                QMessageBox.warning(self, "来源文件夹无效", "请选择文档库之外的来源文件夹")
-                return False
-            self.source_edit.setText(selected)
-            self.save_settings()
-            self.update_controls()
-            return True
-        return False
+    def apply_theme(self, theme_name: str, persist: bool = True):
+        self.theme_name = "dark" if theme_name == "dark" else "light"
+        dark = self.theme_name == "dark"
+        self.backdrop.dark = dark
+        self.backdrop.update()
+        self.setStyleSheet(_build_qss(self.theme_name))
+        apply_titlebar_theme(self, dark=dark)
 
-    def choose_and_scan_folder(self):
-        if self.worker is None and self.choose_source():
-            self.start_scan()
+        ink = "#e2ecf8" if dark else "#1e293b"
+        muted_ink = "#cfe0f2" if dark else "#475569"
+        self.screenshot_button.setIcon(line_icon("capture", "#ffffff"))
+        self.long_button.setIcon(line_icon("scroll", ink))
+        self.video_button.setIcon(line_icon("video", ink))
+        self.open_dir_btn.setIcon(line_icon("folder", muted_ink))
+        self.cfg_btn.setIcon(line_icon("settings", muted_ink))
+        self.theme_button.setIcon(line_icon("sun" if dark else "moon", muted_ink))
+        self.theme_button.setToolTip("切换到晨雾浅色" if dark else "切换到深蓝暗色")
+        self.directory_button.setIcon(line_icon("folder", "#60a5fa" if dark else "#2563eb"))
+        self.beautify_pick.setIcon(line_icon("sparkle", "#c4b5fd" if dark else "#7c3aed"))
+        self.refresh_btn.setIcon(line_icon("refresh", muted_ink))
 
-    def choose_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "添加要整理的文件", self.source_edit.text() or "D:/",
-                                               "文档 (*.pdf *.PDF *.docx *.DOCX *.doc *.DOC *.txt *.TXT)")
-        if paths:
-            self.import_files(paths)
+        if persist:
+            self._save_theme(self.theme_name)
+        self.refresh_summary()
 
-    def dragEnterEvent(self, event):
-        if self.worker is None and event.possibleActions() & Qt.DropAction.CopyAction and event.mimeData().hasUrls() and any(
-            url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in EXTENSIONS
-            for url in event.mimeData().urls()
-        ):
-            event.setDropAction(Qt.DropAction.CopyAction)
-            event.accept()
+    def _build_command_bar(self):
+        bar = QFrame()
+        bar.setObjectName("commandBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
+
+        icon = QLabel()
+        icon.setPixmap(QIcon(str(ICON_PATH)).pixmap(28, 28))
+        layout.addWidget(icon)
+
+        brand = QLabel("SnapFlow")
+        brand.setObjectName("brandName")
+        layout.addWidget(brand)
+
+        self.hotkey_badge = QPushButton("Alt+S")
+        self.hotkey_badge.setObjectName("hotkeyBadge")
+        self.hotkey_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hotkey_badge.setToolTip("点击修改截图快捷键与保存目录")
+        self.hotkey_badge.clicked.connect(self.screenshot_settings)
+        layout.addWidget(self.hotkey_badge)
+
+        layout.addStretch(1)
+
+        self.screenshot_button = QPushButton("框选截图")
+        self.screenshot_button.setObjectName("primaryBtn")
+        self.screenshot_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.screenshot_button.clicked.connect(self.take_screenshot)
+        layout.addWidget(self.screenshot_button)
+
+        self.long_button = QPushButton("长截图")
+        self.long_button.setObjectName("dockBtn")
+        self.long_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.long_button.clicked.connect(self.take_long_screenshot)
+        layout.addWidget(self.long_button)
+
+        self.video_button = QPushButton("录屏")
+        self.video_button.setObjectName("dockBtn")
+        self.video_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.video_button.clicked.connect(self.take_video_recording)
+        layout.addWidget(self.video_button)
+
+        capsule = QFrame()
+        capsule.setObjectName("audioBox")
+        cap_layout = QHBoxLayout(capsule)
+        cap_layout.setContentsMargins(3, 3, 3, 3)
+        cap_layout.setSpacing(2)
+
+        self.audio_group = QButtonGroup(self)
+        self.audio_group.setExclusive(True)
+        self.audio_buttons = {}
+        for mode, label in (("silent", "无声"), ("system", "电脑声音")):
+            btn = QPushButton(label)
+            btn.setObjectName("audioSeg")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, m=mode: self._select_audio_mode(m))
+            self.audio_group.addButton(btn)
+            self.audio_buttons[mode] = btn
+            cap_layout.addWidget(btn)
+        self.audio_buttons["silent"].setChecked(True)
+        layout.addWidget(capsule)
+
+        layout.addStretch(1)
+
+        self.open_dir_btn = QPushButton()
+        self.open_dir_btn.setObjectName("iconBtn")
+        self.open_dir_btn.setFixedSize(34, 34)
+        self.open_dir_btn.setToolTip("打开保存目录")
+        self.open_dir_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.open_dir_btn.clicked.connect(self.open_save_directory)
+
+        self.cfg_btn = QPushButton()
+        self.cfg_btn.setObjectName("iconBtn")
+        self.cfg_btn.setFixedSize(34, 34)
+        self.cfg_btn.setToolTip("截图设置与快捷键")
+        self.cfg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cfg_btn.clicked.connect(self.screenshot_settings)
+
+        self.startup_button = QPushButton()
+        self.startup_button.setObjectName("iconBtn")
+        self.startup_button.setFixedSize(34, 34)
+        self.startup_button.setToolTip("开机自启动设置")
+        self.startup_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.startup_button.clicked.connect(self.show_settings)
+
+        self.theme_button = QPushButton()
+        self.theme_button.setObjectName("iconBtn")
+        self.theme_button.setFixedSize(34, 34)
+        self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_button.clicked.connect(self.toggle_theme)
+
+        layout.addWidget(self.open_dir_btn)
+        layout.addWidget(self.cfg_btn)
+        layout.addWidget(self.startup_button)
+        layout.addWidget(self.theme_button)
+        return bar
+
+    def _build_filter_bar(self):
+        row = QHBoxLayout()
+        row.setSpacing(10)
+
+        capsule = QFrame()
+        capsule.setObjectName("filterBox")
+        c_layout = QHBoxLayout(capsule)
+        c_layout.setContentsMargins(3, 3, 3, 3)
+        c_layout.setSpacing(2)
+
+        self.filter_group = QButtonGroup(self)
+        self.filter_group.setExclusive(True)
+        self.filter_buttons = {}
+        for key, label in (("all", "全部"), ("image", "截图"), ("video", "录屏")):
+            btn = QPushButton(label)
+            btn.setObjectName("filterTab")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, k=key: self.set_gallery_filter(k))
+            self.filter_group.addButton(btn)
+            self.filter_buttons[key] = btn
+            c_layout.addWidget(btn)
+        self.filter_buttons["all"].setChecked(True)
+        row.addWidget(capsule)
+
+        self.recent_count = QLabel("暂无记录")
+        self.recent_count.setObjectName("countLabel")
+        row.addWidget(self.recent_count)
+
+        self.directory_button = QPushButton("桌面")
+        self.directory_button.setObjectName("subtleBoxBtn")
+        self.directory_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.directory_button.clicked.connect(self.open_save_directory)
+        row.addWidget(self.directory_button)
+
+        row.addStretch(1)
+
+        self.beautify_pick = QPushButton("美化图片")
+        self.beautify_pick.setObjectName("subtleBoxBtn")
+        self.beautify_pick.setToolTip("选择本地截图进行渐变套壳美化")
+        self.beautify_pick.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.beautify_pick.clicked.connect(self.beautify_from_file)
+
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setObjectName("subtleBoxBtn")
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.clicked.connect(lambda _=False: self.refresh_recent())
+
+        row.addWidget(self.beautify_pick)
+        row.addWidget(self.refresh_btn)
+        return row
+
+    def _build_gallery_area(self):
+        self.gallery_scroll = QScrollArea()
+        self.gallery_scroll.setObjectName("galleryScroll")
+        self.gallery_scroll.setWidgetResizable(True)
+        self.gallery_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.gallery_host = QWidget()
+        self.gallery_host.setObjectName("galleryGridHost")
+        self.gallery_layout = QGridLayout(self.gallery_host)
+        self.gallery_layout.setContentsMargins(2, 2, 6, 8)
+        self.gallery_layout.setSpacing(14)
+
+        self.gallery_scroll.setWidget(self.gallery_host)
+        return self.gallery_scroll
+
+    def set_gallery_filter(self, kind: str):
+        if kind not in ("all", "image", "video"):
+            kind = "all"
+        self.current_filter = kind
+        if kind in self.filter_buttons:
+            blocked = self.filter_buttons[kind].blockSignals(True)
+            self.filter_buttons[kind].setChecked(True)
+            self.filter_buttons[kind].blockSignals(blocked)
+        self.refresh_recent()
+
+    @property
+    def audio_mode(self) -> str:
+        for mode, btn in self.audio_buttons.items():
+            if btn.isChecked():
+                return mode
+        return "silent"
+
+    def set_audio_mode(self, mode: str):
+        target = "system" if mode == "system" else "silent"
+        for key, btn in self.audio_buttons.items():
+            blocked = btn.blockSignals(True)
+            btn.setChecked(key == target)
+            btn.blockSignals(blocked)
+
+    def _select_audio_mode(self, mode: str):
+        self.set_audio_mode(mode)
+        if self.capture_controller is not None:
+            self.capture_controller.change_video_audio_mode(mode)
+
+    def _configured_settings(self, controller=None):
+        ctrl = controller or self.capture_controller
+        if ctrl is not None:
+            return dict(ctrl.settings)
+        desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+        settings = {"hotkey": "Alt+S", "directory": desktop or str(Path.home() / "Desktop")}
+        config_path = self.home / "screenshot.json"
+        try:
+            if config_path.exists():
+                saved = json.loads(config_path.read_text(encoding="utf-8"))
+                if isinstance(saved.get("hotkey"), str) and saved["hotkey"].strip():
+                    settings["hotkey"] = saved["hotkey"].strip()
+                if isinstance(saved.get("directory"), str) and Path(saved["directory"]).is_absolute():
+                    settings["directory"] = saved["directory"]
+        except Exception:
+            pass
+        return settings
+
+    def refresh_summary(self, controller=None):
+        ctrl = controller or self.capture_controller
+        settings = self._configured_settings(ctrl)
+        directory = Path(settings["directory"]).resolve()
+        self._directory_path = directory
+        folder_label = directory.name or str(directory)
+        self.directory_button.setText(folder_label)
+        self.directory_button.setToolTip(f"当前保存目录（点击打开）：\n{directory}")
+
+        hotkey = settings["hotkey"]
+        if ctrl is not None:
+            active = hasattr(ctrl, "hotkey") and ctrl.hotkey.ident is not None
+            self.hotkey_badge.setText(f"{hotkey}" if active else f"{hotkey} 未启用")
+            self.hotkey_badge.setProperty("inactive", not active)
+            self.set_audio_mode(getattr(ctrl, "video_audio_mode", "silent"))
         else:
-            event.ignore()
+            active = True
+            self.hotkey_badge.setText(f"{hotkey}")
+            self.hotkey_badge.setProperty("inactive", False)
+            self.screenshot_button.setText(f"框选截图  {hotkey}" if len(hotkey) <= 7 else "框选截图")
 
-    def dragMoveEvent(self, event):
-        self.dragEnterEvent(event)
+        self.hotkey_badge.style().unpolish(self.hotkey_badge)
+        self.hotkey_badge.style().polish(self.hotkey_badge)
 
-    def dropEvent(self, event):
-        if self.worker is not None or not event.possibleActions() & Qt.DropAction.CopyAction or not event.mimeData().hasUrls():
-            event.ignore()
-            return
-        paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
-        if paths:
-            event.setDropAction(Qt.DropAction.CopyAction)
-            event.accept()
-            self.import_files(paths)
-        else:
-            event.ignore()
+        try:
+            enabled = StartupRegistration(self.home).enabled()
+        except Exception:
+            enabled = False
+        dark = self.theme_name == "dark"
+        self.startup_button.setProperty("active", enabled)
+        self.startup_button.setIcon(
+            line_icon("power", "#10b981" if enabled else ("#cfe0f2" if dark else "#475569"))
+        )
+        self.startup_button.setToolTip("开机自启动：已开启（点击管理）" if enabled else "开机自启动：已关闭（点击开启）")
+        self.startup_button.style().unpolish(self.startup_button)
+        self.startup_button.style().polish(self.startup_button)
 
-    def import_files(self, paths, force=False):
-        if self.worker is not None:
-            return
-        known = {str(item.path).casefold():item for item in self.items}
-        fresh, seen = [], set()
-        for path in paths:
-            key = str(Path(path).resolve()).casefold()
-            changed = False
-            if key in known:
-                try:
-                    info = Path(path).stat()
-                    changed = (info.st_size,info.st_mtime_ns)!=(known[key].size,known[key].mtime_ns)
-                except OSError:
-                    changed = True
-            if key not in seen and (key not in known or changed or force):
-                fresh.append(Path(path))
-                seen.add(key)
-        self.tabs.setCurrentIndex(0)
-        if not fresh:
-            self.statusBar().showMessage("这些文件已在列表中，无需重复添加。")
-            return
-        library = self.catalog.library if self.catalog else None
-        rules = json.loads(json.dumps(self.rules))
-        organization_rules = json.loads(json.dumps(self.organization_rules))
-        self.launch_worker(lambda p, c: scan_files(fresh, rules, library, p, c, organization_rules, refresh_body=force), self.import_finished)
+        self.refresh_recent(hotkey=hotkey, hotkey_active=active)
 
-    def import_finished(self, result):
-        incoming, warnings = result
-        if self.watch_import and self.catalog:
-            self.catalog.acknowledge_watch(self.watch_import,incoming)
-            self.watch_import=[]
-        selected = {str(item.path): self.scan_table.item(row, 0).checkState() == Qt.CheckState.Checked
-                    for row, item in enumerate(self.items)}
-        positions = {str(item.path).casefold():row for row,item in enumerate(self.items)}
-        for item in incoming:
-            key = str(item.path).casefold()
-            if key in positions:
-                row = positions[key]
-                if not self.catalog:
-                    for field in ('course','project','tags'):
-                        if field in self.items[row].manual_fields.split(','):
-                            setattr(item,field,getattr(self.items[row],field))
-                    item.manual_fields = self.items[row].manual_fields
-                self.items[row] = item
-                self.archive_statuses.pop(str(item.path),None)
+    def refresh_recent(self, _checked=False, *, hotkey=None, hotkey_active=None):
+        self._gallery_cards = []
+        self.empty_title = None
+        while self.gallery_layout.count():
+            item = self.gallery_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if hotkey is None:
+            hotkey = self._configured_settings()["hotkey"]
+        if hotkey_active is None:
+            if self.capture_controller is not None and hasattr(self.capture_controller, "hotkey"):
+                hotkey_active = self.capture_controller.hotkey.ident is not None
             else:
-                positions[key] = len(self.items)
-                self.items.append(item)
-        self.populate_scan(selected)
-        self.save_loose_queue()
-        self.refresh_filter_options()
-        self.import_hint.setText(f"已添加 {len(self.items)} 个文件，可继续拖入")
-        self.statusBar().showMessage(f"已读取 {len(incoming)} 个文件。检查分类后，点击确认归档。")
-        if warnings:
-            QMessageBox.warning(self, "添加提示", "\n".join(warnings[:30]))
-        if self.catalog:
-            self.refresh_history()
+                hotkey_active = True
 
-    def clear_imports(self):
-        if self.worker is not None:
-            return
-        if self.items and QMessageBox.question(self, "清空待整理列表", "清空当前列表？原文件和已归档文件都会保留。") != QMessageBox.StandardButton.Yes:
-            return
-        if self.catalog:
-            self.catalog.dismiss_inbox([item.doc_id for item in self.items])
-        self.items = []
-        self.archive_statuses.clear()
-        self.populate_scan()
-        self.save_loose_queue()
-        self.import_hint.setText("拖入 PDF、DOCX、DOC、TXT，或点击添加文件")
-        self.update_controls()
-
-    def set_library(self, path):
-        validate_library(path)
-        if self.source_edit.text() and within(Path(self.source_edit.text()), path):
-            raise ValueError("来源文件夹不能是文档库或文档库的子文件夹")
-        new_catalog = Catalog(path)
-        if any(within(item.path, new_catalog.library) for item in self.items):
-            raise ValueError('待整理文件位于这个文档库内，请先清空列表或选择其他文档库')
-        saved_ids = [(item, new_catalog.save_scan(item)) for item in self.items] if not self.catalog or self.catalog.library != new_catalog.library else []
-        for item, doc_id in saved_ids:
-            item.doc_id = doc_id
-        self.catalog = new_catalog
-        self.refresh_categories()
-        self.reset_watch()
-        known = {str(item.path).casefold() for item in self.items}
-        self.items.extend(item for item in new_catalog.inbox() if str(item.path).casefold() not in known)
-        self.archive_statuses.clear()
-        self.populate_scan({str(item.path):item.selected for item in self.items})
-        self.search_page = 0
-        self.library_edit.setText(str(path.resolve()))
-        self.library_edit.setToolTip(str(path.resolve()))
-        self.library_button.setText("切换")
-        self.clear_filters()
-        self.refresh_filter_options()
-        self.save_loose_queue()
-        self.refresh_search()
-        self.update_selection()
-        if new_catalog.pending_tasks() or new_catalog.pending_undos() or new_catalog.pending_restores():
-            self.statusBar().showMessage('发现未完成任务，可在“更多操作 → 恢复未完成归档”中检查。')
-
-    def choose_library(self):
-        selected = QFileDialog.getExistingDirectory(self, "选择文档库（文件将按分类复制到这里）", self.library_edit.text() or "D:/")
-        if selected:
+        directory = self._directory_path or Path(self._configured_settings()["directory"]).resolve()
+        entries = []
+        if directory.is_dir():
             try:
-                self.set_library(Path(selected))
-                self.save_settings()
-                self.update_controls()
-            except Exception as exc:
-                QMessageBox.warning(self, "文档库不可用", str(exc))
+                for child in directory.iterdir():
+                    if not child.is_file():
+                        continue
+                    ext = child.suffix.lower()
+                    if ext not in (".png", ".mp4"):
+                        continue
+                    if self.current_filter == "image" and ext != ".png":
+                        continue
+                    if self.current_filter == "video" and ext != ".mp4":
+                        continue
+                    stat = child.stat()
+                    entries.append((stat.st_mtime, stat.st_size, child))
+            except OSError:
+                entries = []
 
-    def update_controls(self):
-        busy = self.worker is not None
-        for widget in (self.source_button, self.file_button, self.library_button, self.rule_button, self.all_check,
-                       self.scan_table, self.search_button, self.search_category):
-            widget.setEnabled(not busy)
-        self.scan_button.setEnabled(not busy)
-        self.reclassify_button.setEnabled(not busy and bool(self.items))
-        self.clear_action.setEnabled(not busy and bool(self.items))
-        self.more_button.setEnabled(not busy)
-        self.settings_button.setEnabled(not busy)
-        self.cards_view.setEnabled(not busy)
-        self.review_sort.setEnabled(not busy)
-        self.reading_button.setEnabled(not busy and bool(self.archive_rows))
-        self.reading_filter.setEnabled(not busy)
-        self.remember_category_action.setEnabled(not busy and self.catalog is not None)
-        self.category_rules_action.setEnabled(not busy and self.catalog is not None)
-        self.watch_action.setEnabled(not busy and self.catalog is not None)
-        self.details_panel.show_item(self.scan_table.currentRow())
-        self.clear_button.setEnabled(not busy and bool(self.items))
-        self.bulk_button.setEnabled(not busy and bool(self.items))
-        self.reread_button.setEnabled(not busy and bool(self.items))
-        self.view_button.setEnabled(not busy)
-        self.labels_button.setEnabled(not busy and bool(self.archive_rows))
-        self.recycle_action.setEnabled(not busy and self.catalog is not None)
-        self.full_backup_action.setEnabled(not busy and self.catalog is not None)
-        self.restore_backup_action.setEnabled(not busy)
-        self.previous_page.setEnabled(not busy and self.search_page>0)
-        self.next_page.setEnabled(not busy and (self.search_page+1)*self.page_size<self.search_total)
-        for navigation in self.nav_buttons:
-            navigation.setEnabled(not busy)
-        self.search_edit.setEnabled(not busy)
-        self.search_scope.setEnabled(not busy)
-        self.search_sort.setEnabled(not busy)
-        self.quality_filter.setEnabled(not busy)
-        self.quality_button.setEnabled(not busy and self.catalog is not None)
-        for combo in (*self.filter_combos.values(), self.saved_view_combo):
-            combo.setEnabled(not busy and self.catalog is not None)
-        self.details_button.setEnabled(not busy and bool(self.items))
-        self.all_check.setVisible(bool(self.items))
-        self.progress.setVisible(busy)
-        self.progress_container.setVisible(busy)
-        self.cancel_button.setVisible(busy)
-        self.cancel_button.setEnabled(busy)
-        self.update_selection()
-        self.update_archive_selection()
+        entries.sort(key=lambda item: item[0], reverse=True)
+        items = entries[:18]
+        self.recent_count.setText(f"最近 {len(items)} 项" if items else "暂无记录")
 
-    def update_selection(self, sync_cards=True):
-        selected = sum(1 for row in range(self.scan_table.rowCount())
-                       if self.scan_table.item(row, 0) is not None
-                       and self.scan_table.item(row, 0).checkState() == Qt.CheckState.Checked)
-        self.archive_button.setEnabled(self.worker is None and selected > 0 and self.catalog is not None)
-        blocked = self.all_check.blockSignals(True)
-        self.all_check.setCheckState(Qt.CheckState.Checked if not self.items or selected==len(self.items) else
-                                    Qt.CheckState.Unchecked if not selected else Qt.CheckState.PartiallyChecked)
-        self.all_check.blockSignals(blocked)
-        if self.items:
-            pending = sum(self.items[row].category == "待整理" for row in range(len(self.items))
-                          if self.scan_table.item(row, 0).checkState() == Qt.CheckState.Checked)
-            suffix = f" · {pending} 个待整理" if pending else ""
-            self.count_label.setText(f"已选择 {selected} 个文件（共 {len(self.items)} 个）{suffix}")
-            self.file_count.setText(f"{len(self.items)} 个文件 · {sum(attention_rank(i)>0 for i in self.items)} 个需检查")
-            self.selection_hint.setText("请先选择右上角的文档库，才能确认归档。" if not self.catalog else
-                                        "至少勾选一个文件，才能确认归档。" if not selected else
-                                        "归档会复制文件，原文件保留；同名文件自动编号。")
-        else:
-            self.count_label.setText("尚未添加文件")
-            self.file_count.setText("尚未添加文件")
-            self.selection_hint.setText("添加文件后，检查分类建议再确认归档。")
-        if sync_cards:
-            self.cards_view.sync()
-        archived = bool(self.items) and all(self.archive_statuses.get(str(item.path), (False, ''))[0]
-                                            for item in self.items)
-        self.steps_label.set_stage(2 if archived else 1 if self.items else 0)
+        dark = self.theme_name == "dark"
+        if not items:
+            empty = QFrame()
+            empty.setObjectName("emptyCard")
+            e_layout = QVBoxLayout(empty)
+            e_layout.setContentsMargins(28, 36, 28, 36)
+            e_layout.setSpacing(12)
+            e_layout.addStretch(1)
 
-    def launch_worker(self, operation, callback):
-        if self.worker is not None:
+            icon_lbl = QLabel()
+            icon_lbl.setPixmap(QIcon(str(ICON_PATH)).pixmap(52, 52))
+            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            e_layout.addWidget(icon_lbl)
+
+            title_text = (
+                f"按下 {hotkey}，捕获你的第一张画面"
+                if (hotkey_active and self.current_filter != "video")
+                else "当前分类下还没有记录"
+            )
+            title = QLabel(title_text)
+            title.setObjectName("emptyTitle")
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.empty_title = title
+            e_layout.addWidget(title)
+
+            sub = QLabel("支持框选标注、滚动长截图、区域录屏与桌面悬浮贴图")
+            sub.setObjectName("emptySub")
+            sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            e_layout.addWidget(sub)
+
+            tiles_row = QHBoxLayout()
+            tiles_row.setSpacing(10)
+            tiles_row.addStretch(1)
+            for label, obj_name, handler in (
+                ("框选标注 · 序号/荧光笔", "featureTileBlue", self.take_screenshot),
+                ("滚动长截图 · 自动拼接", "featureTileGreen", self.take_long_screenshot),
+                ("区域录屏 · 电脑声音", "featureTileViolet", self.take_video_recording),
+                ("美化套壳 · 渐变圆角", "featureTileAmber", self.beautify_from_file),
+            ):
+                tile = QPushButton(label)
+                tile.setObjectName(obj_name)
+                tile.setCursor(Qt.CursorShape.PointingHandCursor)
+                tile.clicked.connect(handler)
+                tiles_row.addWidget(tile)
+            tiles_row.addStretch(1)
+            e_layout.addSpacing(4)
+            e_layout.addLayout(tiles_row)
+
+            cta_row = QHBoxLayout()
+            cta_row.addStretch(1)
+            cta = QPushButton("立即框选截图")
+            cta.setObjectName("primaryBtn")
+            cta.setIcon(line_icon("capture", "#ffffff"))
+            cta.setCursor(Qt.CursorShape.PointingHandCursor)
+            cta.clicked.connect(self.take_screenshot)
+            cta_row.addWidget(cta)
+            cta_row.addStretch(1)
+            e_layout.addSpacing(6)
+            e_layout.addLayout(cta_row)
+            e_layout.addStretch(2)
+
+            self.gallery_layout.addWidget(empty, 0, 0, 1, 3)
             return
-        self.worker = Worker(operation, self)
-        self.worker.progress.connect(self.on_progress)
-        self.worker.completed.connect(callback)
-        self.worker.failed.connect(self.on_failure)
-        self.worker.finished.connect(self.worker_finished)
-        self.update_controls()
-        self.worker.start()
 
-    def worker_finished(self):
-        self.worker.deleteLater()
-        self.worker = None
-        if self.progress.maximum() == 0:
-            self.progress.setRange(0, 100)
-        self.progress.setValue(self.progress.maximum())
-        self.progress.setFormat("处理结束")
-        self.update_controls()
+        for idx, (mtime, size_bytes, path) in enumerate(items):
+            card = GalleryCard(path, mtime, size_bytes, dark, self)
+            self._gallery_cards.append(card)
+            self.gallery_layout.addWidget(card, idx // 3, idx % 3)
+        for col in range(3):
+            self.gallery_layout.setColumnStretch(col, 1)
+        self.gallery_layout.setRowStretch((len(items) - 1) // 3 + 1, 1)
 
-    def on_progress(self, current, total, message):
-        self.progress.setRange(0, total)
-        self.progress.setValue(current)
-        self.progress.setFormat(f"{current}/{total}" if total else "正在发现文件…")
-        self.statusBar().showMessage(message)
+    def _load_image_or_warn(self, path: Path) -> QImage | None:
+        if not path.is_file():
+            QMessageBox.warning(self, "文件不存在", f"图片可能已被移动或删除：\n{path}")
+            self.refresh_recent()
+            return None
+        image = QImage(str(path))
+        if image.isNull():
+            QMessageBox.warning(self, "读取失败", f"无法读取图片内容：\n{path}")
+            return None
+        return image
 
-    def on_failure(self, message):
-        self.watch_import=[]
-        self.statusBar().showMessage("处理失败")
-        if not (self.capture_controller and self.capture_controller.exiting):
-            QMessageBox.critical(self, "处理失败", message)
-
-    def cancel_work(self):
-        if self.worker:
-            self.worker.requestInterruption()
-            self.cancel_button.setEnabled(False)
-            self.statusBar().showMessage("正在停止：保留已完成结果。正文解析最多等待 25 秒；哈希与复制可在分块间停止。")
-
-    def start_scan(self):
-        if not self.source_edit.text():
+    def copy_recent_image(self, path: Path):
+        image = self._load_image_or_warn(path)
+        if image is None:
             return
-        source = Path(self.source_edit.text())
-        library = self.catalog.library if self.catalog else None
-        rules = json.loads(json.dumps(self.rules))
-        self.tabs.setCurrentIndex(0)
-        organization_rules = json.loads(json.dumps(self.organization_rules))
-        self.launch_worker(lambda p, c: scan_folder(source, rules, library, p, c, organization_rules), self.scan_finished)
-
-    def scan_finished(self, result):
-        self.import_finished(result)
-
-    def populate_scan(self, selected_states=None):
-        self.scan_table.blockSignals(True)
-        if self.review_order=='attention':
-            self.items.sort(key=lambda i:-attention_rank(i))
-        self.scan_table.setRowCount(len(self.items))
-        for row, item in enumerate(self.items):
-            check = QTableWidgetItem()
-            check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            checked = selected_states.get(str(item.path), True) if selected_states is not None else self.all_check.isChecked()
-            item.selected = checked
-            check.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
-            self.scan_table.setItem(row, 0, check)
-            filename = QTableWidgetItem(item.display_title or item.path.name)
-            filename.setToolTip(str(item.path))
-            filename.setData(GLYPH, item.path.suffix[1:].upper())
-            size = f"{item.size / 1024:.1f} KB" if item.size >= 1024 else f"{item.size} 字节"
-            filename.setData(SUBTEXT, f"{item.path.name} · {size}" if item.display_title else f"{size} · 双击打开原文件")
-            self.scan_table.setItem(row, 1, filename)
-            evidence, separator, score = item.reason.partition("。得分：")
-            reason = QTableWidgetItem(evidence)
-            reason.setToolTip(item.reason)
-            reason.setData(SUBTEXT, f"得分：{score}" if separator else f"建议：{item.suggested}")
-            self.scan_table.setItem(row, 3, reason)
-            self.scan_table.setItem(row, 4, QTableWidgetItem())
-            self.update_scan_status(row)
-            self.scan_table.removeCellWidget(row, 2)
-            self.scan_table.setItem(row, 2, QTableWidgetItem(item.category))
-        self.scan_table.blockSignals(False)
-        self.cards_view.rebuild()
-        self.review_stack.setCurrentIndex(0 if not self.items else 2 if self.review_mode=='list' else 1)
-        self.detail.clear()
-        self.reason_label.clear()
-        self.reason_label.hide()
-        self.details_panel.show_item(-1)
-        if self.items:
-            self.scan_table.selectRow(0)
-            self.show_scan_detail()
-        self.update_selection()
-        self.persist_review_selection()
-
-    def category_combo(self, row):
-        holder = self.scan_table.cellWidget(row, 2)
-        if holder:
-            return holder.findChild(QComboBox)
-        item = self.items[row]
-        combo = QComboBox()
-        combo.addItems(self.categories)
-        combo.setCurrentText(item.category)
-        combo.currentTextChanged.connect(lambda value,index=row:self.category_changed(index,value))
-        combo.setToolTip(f"建议：{item.suggested}\n{item.reason}")
-        combo.setAccessibleName(f"{item.path.name} 的分类")
-        holder = QFrame()
-        holder.setObjectName('categoryCell')
-        layout = QHBoxLayout(holder)
-        layout.setContentsMargins(8,0,8,0)
-        layout.addWidget(combo)
-        self.scan_table.setCellWidget(row,2,holder)
-        return combo
-
-    def update_scan_status(self, row):
-        item = self.items[row]
-        cell = self.scan_table.item(row, 4)
-        cell.setForeground(QColor("#202733" if item.status.startswith("已提取") else WARNING))
-        cell.setText("已读取正文" if item.status.startswith("已提取") else "无法提取正文")
-        cell.setToolTip(item.status)
-        subtitle = "已手动修改分类" if item.category != item.suggested else (
-            "待确认分类" if item.category == "待整理" else "待确认归档")
-        if str(item.path) in self.archive_statuses:
-            ok, message = self.archive_statuses[str(item.path)]
-            cell.setText(('已有相同内容' if '内容相同' in message else '已归档') if ok else "归档失败 · 请检查")
-            cell.setToolTip(f"{item.status}\n{message}")
-            cell.setForeground(QColor(SUCCESS if ok else WARNING))
-            subtitle = "原文件保留" if ok else "请查看详情"
-        cell.setData(SUBTEXT, subtitle)
-
-    def check_all(self, checked):
-        blocked = self.scan_table.blockSignals(True)
         try:
-            for row in range(self.scan_table.rowCount()):
-                self.scan_table.item(row, 0).setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
-        finally:
-            self.scan_table.blockSignals(blocked)
-        self.update_selection()
-        self.persist_review_selection()
+            from .screen_capture import copy_image
 
-    def scan_item_changed(self, cell):
-        if cell.column() == 0:
-            self.persist_review_selection()
-        self.update_selection(sync_cards=False)
-        self.cards_view.sync(cell.row())
-
-    def category_changed(self, row, category):
-        item = self.items[row]
-        old = item.category
-        try:
-            if self.catalog and item.doc_id:
-                self.catalog.change_category(item.doc_id, category)
-                self.sync_document_revision(item)
-            item.category = category
-            self.scan_table.item(row,2).setText(category)
-            self.archive_statuses.pop(str(item.path),None)
-            self.update_scan_status(row)
-            self.update_selection()
-            self.show_scan_detail()
-            self.refresh_history()
-            self.save_loose_queue()
+            copy_image(image)
         except Exception as exc:
-            combo = self.category_combo(row)
-            combo.blockSignals(True)
-            combo.setCurrentText(old)
-            combo.blockSignals(False)
-            QMessageBox.warning(self, "分类保存失败", str(exc))
-
-    def show_scan_detail(self):
-        row = self.scan_table.currentRow()
-        self.details_panel.show_item(row)
-        self.cards_view.sync()
-        if 0 <= row < len(self.items):
-            item = self.items[row]
-            reason = item.reason if len(item.reason) <= 180 else item.reason[:180] + "…（完整依据见文件详情）"
-            if item.category != item.suggested:
-                reason += f"；你已改为{item.category}"
-            self.reason_label.setText("分类依据：" + reason)
-            self.reason_label.setToolTip(item.reason)
-            self.detail.setPlainText(f"原路径：{item.path}\n大小：{item.size:,} 字节\n正文：{item.status}\n"
-                f"建议：{item.suggested}　确认分类：{item.category}\n依据：{item.reason}\n\n正文预览（最多 6000 字）：\n"
-                + (item.body[:6000] or "[无可提取正文，分类仅参考文件名；请人工检查原文件]"))
-
-    def show_details(self):
-        if self.items:
-            self.details_panel.show()
-            self.show_scan_detail()
-            self.details_panel.preview.setFocus()
+            QMessageBox.warning(self, "复制失败", str(exc))
             return
-        self.details_dialog.show()
-        self.details_dialog.raise_()
-        self.details_dialog.activateWindow()
+        self.statusBar().showMessage(f"已复制到剪贴板：{path.name}", 6000)
 
-    def show_history(self):
-        try:
-            self.refresh_history()
-            self.history_dialog.show()
-            self.history_dialog.raise_()
-        except Exception as exc:
-            QMessageBox.warning(self, "记录读取失败", str(exc))
-
-    def show_help(self):
-        QMessageBox.information(self, "如何使用", "存资料：\n1. 选择一次文档库，例如 D:\\DocumentLibrary。\n2. 把桌面文件拖进窗口，或点击添加文件。\n3. 检查分类，点击确认归档。\n\n取资料：\n进入“文档库”，输入文件名，双击结果即可打开。\n留空显示全部归档文件，最新存入的排在前面。\n\n要整理整个文件夹，可点击扫描文件夹。\n原文件会保留。规则和操作记录在“更多操作”里。\n\n截图：\n默认按 Alt+S 或点侧栏“框选截图”，框选后直接在原位置标注，按 Enter 或点击完成仅复制。文字在选区内输入，Enter 确认文字。调整工具可移动选区；选择工具可移动、删除标注，Ctrl+Z 撤销、Ctrl+Y 重做；小字保存入口写入桌面。\n保存位置和快捷键在“设置 → 截图设置”修改。\n关闭主窗口后在托盘运行，托盘菜单可退出程序。侧栏“设置”可开关开机自启动，开启后登录 Windows 时驻留托盘。")
-
-    def edit_rules(self):
-        dialog = RuleDialog(self.rules, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            try:
-                self.install_category_rules(dialog.rules)
-                self.statusBar().showMessage("规则已保存，下次扫描生效；可点击重新建议分类应用到当前列表。")
-            except Exception as exc:
-                QMessageBox.warning(self, "规则保存失败", str(exc))
-
-    def reclassify(self):
-        answer = QMessageBox.question(self, "重新建议分类", "会使用当前规则重新计算，并重置当前列表里的人工分类。继续？")
-        if answer != QMessageBox.StandardButton.Yes:
+    def pin_recent_image(self, path: Path):
+        image = self._load_image_or_warn(path)
+        if image is None:
             return
-        try:
-            self.archive_statuses.clear()
-            from .document_metadata import classification_suggestion
-            saved_rules=self.catalog.category_rules() if self.catalog else []
-            selections={str(item.path):item.selected for item in self.items}
-            for item in self.items:
-                item.suggested,item.reason=classification_suggestion(item.path,item.body,self.rules,saved_rules)
-                item.category=item.suggested
-                item.manual_fields=','.join(field for field in item.manual_fields.split(',') if field and field!='category')
-                if not item.body:item.reason+='；正文不可用，请人工确认。'+item.status
-                if self.catalog:
-                    item.doc_id = self.catalog.save_scan(item)
-            self.populate_scan(selections)
-            self.save_loose_queue()
-            self.refresh_history()
-        except Exception as exc:
-            QMessageBox.warning(self, "重新分类失败", str(exc))
+        self.ensure_capture().pin_image(image)
+        self.statusBar().showMessage(f"已贴到桌面：{path.name}（拖动移动 · 滚轮缩放 · 双击关闭）", 6000)
 
-    def confirm_archive(self):
-        selected = [item for row, item in enumerate(self.items)
-                    if self.scan_table.item(row, 0).checkState() == Qt.CheckState.Checked]
-        if not selected:
-            QMessageBox.information(self, "没有选中文件", "请勾选需要归档的文件")
+    def beautify_recent_image(self, path: Path):
+        image = self._load_image_or_warn(path)
+        if image is None:
             return
-        counts = {category: sum(i.category == category for i in selected) for category in self.categories}
-        summary = "\n".join(f"{c}：{n} 个" for c, n in counts.items() if n)
-        message = f"将复制 {len(selected)} 个文件到：\n{self.catalog.library}\n\n{summary}\n\n原文件保留。同名文件自动编号，重复归档将跳过。"
-        if counts["待整理"]:
-            message += "\n其中待整理文件也会复制到“待整理”文件夹。"
-        if QMessageBox.question(self, "确认复制归档", message,
-                               QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                               QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+        self.ensure_capture().beautify_image(image)
+
+    def edit_recent_image(self, path: Path):
+        image = self._load_image_or_warn(path)
+        if image is None:
             return
-        duplicate_policy = 'keep'
-        seen = set()
-        duplicates = 0
-        for item in selected:
-            digest = item.content_hash
-            if digest and (digest in seen or any(row['document_id']!=item.doc_id for row in self.catalog.content_duplicates(digest))):
-                duplicates += 1
-            if digest:
-                seen.add(digest)
-        if duplicates:
-            choice = QMessageBox(self)
-            choice.setWindowTitle('发现相同内容')
-            choice.setText(f'有 {duplicates} 个文件内容相同。请选择处理方式：\n关联已有文档会合并课程、项目和标签，并保留来源关联。')
-            link = choice.addButton('关联已有文档', QMessageBox.ButtonRole.AcceptRole)
-            keep = choice.addButton('保留独立副本', QMessageBox.ButtonRole.ActionRole)
-            skip = choice.addButton('仅跳过', QMessageBox.ButtonRole.ActionRole)
-            choice.addButton('取消', QMessageBox.ButtonRole.RejectRole)
-            choice.setDefaultButton(link)
-            choice.exec()
-            selected_button = choice.clickedButton()
-            if selected_button not in (link, keep, skip):
-                return
-            duplicate_policy = 'link' if selected_button == link else 'keep' if selected_button == keep else 'skip'
-        self.begin_archive(selected,duplicate_policy)
+        self.ensure_capture().edit_image(image)
 
-    def begin_archive(self, selected, duplicate_policy='keep'):
-        library = self.catalog.library
-        self.launch_worker(lambda p, c: archive_batch(selected, library, p, c, duplicate_policy), self.archive_finished)
-
-    def archive_finished(self, results):
-        for item, ok, message in results:
-            self.archive_statuses[str(item.path)] = (ok, message)
-            if ok:
-                row = self.items.index(item)
-                self.scan_table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
-            self.scan_table.item(self.items.index(item), 1).setToolTip(f"{item.path}\n{message}")
-            self.update_scan_status(self.items.index(item))
-        successful = sum(ok for _, ok, _ in results)
-        if successful:
-            self.clear_filters()
-            self.tabs.setCurrentIndex(1)
-        self.refresh_filter_options()
-        self.refresh_search()
-        self.statusBar().showMessage(f"已处理 {len(results)} 个：成功 / 重复跳过 {successful} 个，失败 {len(results) - successful} 个。")
-        self.detail.setPlainText("\n".join(message for _, _, message in results))
-        self.reason_label.setText(f"归档完成：{successful} 个成功，{len(results) - successful} 个失败。在“文档库”中双击文件即可打开。")
-        if successful < len(results):
-            QMessageBox.warning(self, "部分文件归档失败", "\n".join(message for _, ok, message in results if not ok)[:3000])
-
-    def focus_library_search(self):
-        if self.worker or self.closing:
+    def beautify_from_file(self):
+        start_dir = str(self._directory_path or self._configured_settings()["directory"])
+        chosen, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择要美化的图片",
+            start_dir,
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)",
+        )
+        if not chosen:
             return
-        self.tabs.setCurrentIndex(1)
-        self.search_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
-        self.search_edit.selectAll()
+        self.beautify_recent_image(Path(chosen))
 
-    def refresh_library(self):
-        if self.worker or self.closing or not self.catalog or self.tabs.currentIndex() != 1:
-            return
-        self.refresh_search()
+    def showEvent(self, event):
+        super().showEvent(event)
+        apply_titlebar_theme(self, dark=(self.theme_name == "dark"))
 
-    def queue_search(self):
-        # A change invalidates old results immediately, before debounce expires.
-        self.search_generation += 1
-        self.pending_search = None
-        if self.search_worker:
-            self.search_worker.requestInterruption()
-        self.archive_rows = []
-        self.search_table.setRowCount(0)
-        self.search_table.setProperty('emptyText', '正在搜索…')
-        self.update_archive_selection()
-        self.search_page = 0
-        self.search_timer.start()
-
-    def update_archive_selection(self):
-        selected = [index.row() for index in self.search_table.selectionModel().selectedRows()
-                    if 0 <= index.row() < len(self.archive_rows)]
-        single = len(selected) == 1
-        record = self.archive_rows[selected[0]] if single else None
-        available = single and record.get('_file_state') == 'available'
-        idle = self.worker is None
-        self.open_archive_button.setEnabled(bool(available) and idle)
-        self.preview_archive_button.setEnabled(bool(available) and idle)
-        self.open_folder_button.setEnabled(single and idle)
-        self.labels_button.setEnabled(bool(selected) and idle)
-        self.reading_button.setEnabled(bool(selected) and idle)
-        self.cleanup_button.setEnabled(self.catalog is not None and idle)
-        self.library_maintenance_button.setEnabled(self.catalog is not None and idle)
-        multiple = len(selected) > 1
-        if self.labels_button.property('prominent') != multiple:
-            self.labels_button.setProperty('prominent', multiple)
-            self.labels_button.style().unpolish(self.labels_button)
-            self.labels_button.style().polish(self.labels_button)
-        self.labels_button.setText('批量分类' if multiple else '分类 / 标签')
-        self.labels_button.setToolTip('批量修改选中文件的分类和标签' if multiple else '修改选中文件的分类和标签')
-        self.reading_button.setText('批量备注' if multiple else '阅读 / 备注')
-        self.reading_button.setToolTip('批量修改选中文件的阅读状态和备注' if multiple else '修改阅读状态和备注')
-        self.open_archive_button.setToolTip('多选时请使用批量操作；打开文件需要单选' if multiple else
-                                          '打开选中的归档副本' if available else '请选择存在的归档文件')
-        if single:
-            title = record.get('display_title') or record['filename']
-            self.library_selection.setText('已选：' + title)
-            self.library_selection.setToolTip(f"标题：{title}\n原文件名：{record['filename']}\n归档路径：{record['archive_path']}")
-            self.library_selection_hint.setText('双击或点击“打开文件”，直接打开归档副本。' if available else
-                                                '归档副本不可用；可在“维护”中检查失效记录。')
-        elif multiple:
-            self.library_selection.setText(f'已选择 {len(selected)} 项')
-            self.library_selection.setToolTip('\n'.join(self.archive_rows[row]['filename'] for row in selected))
-            self.library_selection_hint.setText('可批量修改分类、标签、阅读状态或备注。')
-        else:
-            self.library_selection.setText('选择一个文件')
-            self.library_selection.setToolTip('')
-            self.library_selection_hint.setText('选中文件后可预览或打开，支持 Ctrl / Shift 多选。')
-
-    def cleanup_missing_records(self):
-        if self.worker is not None or self.catalog is None:
-            return
-        try:
-            candidates, unknown = self.catalog.missing_archives()
-            if not candidates:
-                message = '未发现归档副本已不存在的记录，无需清理。'
-                if unknown:
-                    message += f'\n有 {unknown} 条记录暂时无法确认文件状态，已保留。'
-                QMessageBox.information(self, '清理失效记录', message)
-                self.refresh_search()
-                return
-            names = '\n'.join('• ' + row['filename'][:100] for row in candidates[:10])
-            if len(candidates) > 10:
-                names += f'\n……另有 {len(candidates) - 10} 条'
-            message = (f'当前文档库中发现 {len(candidates)} 条归档副本已不存在的记录。\n'
-                       '范围为整个当前文档库，不受搜索或分类筛选限制。\n\n' + names +
-                       '\n\n确认后从文档库列表中移除这些条目。\n原文件、其他现有文件和操作日志都会保留。')
-            if unknown:
-                message += f'\n另有 {unknown} 条状态无法确认，保留不处理。'
-            answer = QMessageBox.question(self, '确认清理失效记录', message,
-                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                          QMessageBox.StandardButton.No)
-            if answer != QMessageBox.StandardButton.Yes:
-                return
-            result = self.catalog.cleanup_missing_archives(candidates)
-            for record in result['records']:
-                status = self.archive_statuses.get(record['source_path'])
-                if status and status[1].endswith(record['archive_path']):
-                    self.archive_statuses.pop(record['source_path'], None)
-                    for row, item in enumerate(self.items):
-                        if str(item.path) == record['source_path']:
-                            self.update_scan_status(row)
-            self.refresh_search()
-            self.show_scan_detail()
-            self.update_controls()
-            summary = f'已清理 {result["removed"]} 条失效记录；文件和操作日志保留。'
-            if result['restored'] or result['skipped']:
-                summary += f' 重新出现或状态变化的 {result["restored"] + result["skipped"]} 条记录已保留。'
-            self.statusBar().showMessage(summary)
-            QMessageBox.information(self, '清理完成', summary)
-        except Exception as exc:
-            QMessageBox.warning(self, '未能清理记录', str(exc))
-
-    def apply_search_result(self, payload):
-        filters = payload['filters']
-        query, category = filters['query'], filters['category']
-        self.search_total, self.search_page = payload['total'], payload['page']
-        pages = max(1,(self.search_total+self.page_size-1)//self.page_size)
-        self.archive_rows = payload['rows']
-        filtered = bool(query or category or any(filters[key] for key in ('course','project','tag','quality','reading')))
-        self.search_table.setProperty("emptyText", "没有找到匹配的文件\n试试更短的关键词，或重置分类、课程等筛选。\n扫描件与空文件无法搜正文；截断文件只能搜前 10 万字。" if filtered else
-                                      "文档库还没有归档记录\n在“添加 / 整理”中确认归档后，文件会出现在这里。")
-        self.search_table.setRowCount(len(self.archive_rows))
-        for row, result in enumerate(self.archive_rows):
-            state = result['_file_state']
-            available = state == 'available'
-            for column, field in enumerate(("filename", "category", "created_at")):
-                cell = QTableWidgetItem(result[field][:10] if field == "created_at" else result[field])
-                if column == 0 and not available:
-                    cell.setText(cell.text() + ("（文件不存在）" if state == 'missing' else '（状态无法确认）'))
-                    cell.setForeground(QColor(WARNING))
-                if column == 0:
-                    if result["display_title"]:
-                        cell.setText(result["display_title"]+('（文件不存在）' if state=='missing' else '（状态无法确认）' if state=='unknown' else ''))
-                    cell.setData(GLYPH, Path(result["filename"]).suffix[1:].upper())
-                    labels = ' · '.join(value for value in (result['course'],result['project'],result['tags']) if value)
-                    snippet = result['body_snippet']
-                    cell.setData(MATCH_TERMS, query_terms(query))
-                    cell.setData(SUBTEXT, '归档副本不存在' if state=='missing' else '归档副本状态无法确认' if state=='unknown' else ' · '.join(v for v in (result['filename'] if result['display_title'] else '',result['reading_state'],snippet or result['notes'][:90] or labels) if v))
-                cell.setToolTip(f"原路径：{result['source_path']}\n归档路径：{result['archive_path']}\n时间（UTC）：{result['created_at']}"
-                                + f"\n课程：{result['course']}\n项目：{result['project']}\n标签：{result['tags']}"
-                               + f"\n显示标题：{result['display_title']}\n标题来源：{result['title_source']}\n阅读状态：{result['reading_state']}\n备注：{result['notes'][:300]}"
-                               + f"\n正文范围：{result['extraction_status'] or '旧记录未保存，请更新正文索引'}"
-                               + ("" if available else "\n归档副本可能已被移动或删除"))
-                self.search_table.setItem(row, column, cell)
-        prefix = "找到" if filtered else "已归档"
-        self.search_count.setText(f"{prefix} {self.search_total} 个文件 · {self.search_sort.currentText()}")
-        self.page_label.setText(f'第 {self.search_page+1} / {pages} 页 · 共 {self.search_total} 项' if pages > 1 else f'共 {self.search_total} 项')
-        self.previous_page.setVisible(pages > 1)
-        self.next_page.setVisible(pages > 1)
-        self.previous_page.setEnabled(self.worker is None and self.search_page>0)
-        self.next_page.setEnabled(self.worker is None and self.search_page+1<pages)
-        if self.archive_rows:
-            self.search_table.selectRow(0)
-        self.update_archive_selection()
-        if self.history_dialog.isVisible():
-            self.refresh_history()
-
-    def refresh_history(self):
-        if not self.catalog:
-            return
-        records = self.catalog.operations()
-        self.history_table.setRowCount(len(records))
-        for row, record in enumerate(records):
-            for column, field in enumerate(("created_at", "action", "detail")):
-                cell = QTableWidgetItem(record[field])
-                cell.setToolTip(record[field])
-                self.history_table.setItem(row, column, cell)
-
-    def open_path(self, path: Path):
-        if not filesystem_path(path).exists():
-            QMessageBox.warning(self, "文件不存在", f"文件可能已被移动或删除：\n{path}")
+    def open_path(self, path: Path) -> bool:
+        target = Path(path).resolve()
+        if not target.exists():
+            QMessageBox.warning(self, "路径不存在", f"文件或目录可能已被移动或删除：\n{target}")
             return False
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(comparison_path(path)))):
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
             QMessageBox.warning(self, "无法打开", "Windows 未能打开该路径，请检查默认应用关联。")
             return False
         return True
 
-    def open_source(self):
-        row = self.scan_table.currentRow()
-        if 0 <= row < len(self.items):
-            return self.open_path(self.items[row].path)
-
-    def open_archive(self):
-        row = self.search_table.currentRow()
-        if 0 <= row < len(self.archive_rows):
-            return self.open_path(Path(self.archive_rows[row]["archive_path"]))
-
-    def open_archive_folder(self):
-        row = self.search_table.currentRow()
-        if 0 <= row < len(self.archive_rows):
-            return self.open_path(Path(self.archive_rows[row]["archive_path"]).parent)
+    def open_save_directory(self):
+        self.ensure_capture().open_directory()
 
     def ensure_capture(self):
         if self.capture_controller is None:
             from .screen_capture import CaptureController
-            self.capture_controller=CaptureController(self)
+
+            self.capture_controller = CaptureController(self)
         return self.capture_controller
 
-    def take_screenshot(self):self.ensure_capture().begin()
+    def take_screenshot(self):
+        self.ensure_capture().begin(mode="photo")
 
-    def screenshot_settings(self):self.ensure_capture().show_settings()
+    def take_long_screenshot(self):
+        self.ensure_capture().begin(mode="long")
+
+    def take_video_recording(self):
+        controller = self.ensure_capture()
+        controller.change_video_audio_mode(self.audio_mode)
+        controller.begin(mode="video")
+
+    def screenshot_settings(self):
+        self.ensure_capture().show_settings()
 
     def show_settings(self):
         from .settings_dialog import SettingsDialog
+
         SettingsDialog(self).exec()
+        self.refresh_summary()
 
     def closeEvent(self, event):
-        capture=self.capture_controller
+        capture = self.capture_controller
         if capture and capture.tray and not capture.exiting:
-            self.save_settings()
             self.hide()
-            capture.notify('已在托盘运行','截图快捷键 '+capture.settings['hotkey']+'；托盘菜单可退出程序')
+            capture.notify("已在托盘运行", "截图快捷键 " + capture.settings["hotkey"] + "；托盘菜单可退出程序")
             event.ignore()
             return
-        if self.worker:
-            self.cancel_work()
-            self.statusBar().showMessage("正在处理当前文件，请处理结束后关闭窗口。")
-            event.ignore()
-            return
-        self.search_timer.stop()
-        self.watch_timer.stop()
         self.closing = True
-        self.pending_search = None
-        if self.search_worker:
-            self.search_worker.requestInterruption()
-            event.ignore()
-            return
-        if self.watch_worker:
-            self.watch_worker.requestInterruption()
-            event.ignore()
-            return
-        self.save_settings()
-        self.details_panel.pdf.shutdown()
         if capture:
             capture.shutdown()
-            QTimer.singleShot(0,QApplication.instance().quit)
+            QTimer.singleShot(0, QApplication.instance().quit)
         event.accept()
 
 
 def configure_app(app):
     configure_process()
-    app.setApplicationName("DocumentAssistant")
+    app.setApplicationName("SnapFlow")
     app.setWindowIcon(QIcon(str(ICON_PATH)))
     app.setStyle("Fusion")
     translator = QTranslator(app)
@@ -1011,23 +1048,29 @@ def main(start_in_tray=False):
     app = QApplication([])
     configure_app(app)
     from .app_instance import AppInstance
-    instance=None
+
+    instance = None
     try:
-        instance=AppInstance(runtime_directory(),app)
-        if not instance.start(activate=not start_in_tray):return 0
+        instance = AppInstance(runtime_directory(), app)
+        if not instance.start(activate=not start_in_tray):
+            return 0
         window = MainWindow()
     except Exception as exc:
-        if instance:instance.shutdown()
-        QMessageBox.critical(None, "启动失败", f"无法初始化 DocumentAssistant：\n{exc}\n请检查运行目录的写权限。")
+        if instance:
+            instance.shutdown()
+        QMessageBox.critical(None, "启动失败", f"无法初始化 SnapFlow：\n{exc}\n请检查运行目录的写权限。")
         return 1
     tag_window(int(window.winId()))
-    if not start_in_tray:window.show()
+    if not start_in_tray:
+        window.show()
     window.ensure_capture()
-    if start_in_tray and not window.capture_controller.tray:window.show()
+    if start_in_tray and not window.capture_controller.tray:
+        window.show()
     instance.activated.connect(window.capture_controller.show_main)
     result = app.exec()
     instance.shutdown()
-    if window.capture_controller:window.capture_controller.shutdown()
+    if window.capture_controller:
+        window.capture_controller.shutdown()
     window.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()

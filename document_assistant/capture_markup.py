@@ -38,6 +38,21 @@ def pen_path(mark, padding=0):
     stroker.setCapStyle(Qt.PenCapStyle.RoundCap);stroker.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     return stroker.createStroke(path)
 
+
+def highlighter_path(mark, padding=0):
+    """Wide translucent marker stroke with relative offsets."""
+    points=style_of(mark).get('path') or [(0,0),(mark[2].x()-mark[1].x(),mark[2].y()-mark[1].y())]
+    origin=mark[1];width=max(12,style_of(mark).get('width',6)*3)+2*padding
+    path=QPainterPath();first=origin+QPointF(*points[0])
+    if len(points)==1 or all(point==points[0] for point in points):
+        path.addEllipse(first,width/2,width/2)
+        return path
+    path.moveTo(first)
+    for point in points[1:]:path.lineTo(origin+QPointF(*point))
+    stroker=QPainterPathStroker();stroker.setWidth(width)
+    stroker.setCapStyle(Qt.PenCapStyle.RoundCap);stroker.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    return stroker.createStroke(path)
+
 def pixelated_image(image,block=6):
     """Average small cells, then enlarge without smoothing to retain mosaic blocks."""
     tiny=image.scaled(max(1,math.ceil(image.width()/block)),max(1,math.ceil(image.height()/block)),
@@ -49,7 +64,11 @@ def pixelated_image(image,block=6):
 def mark_bounds(mark,image_size):
     kind,start,end,text,color=mark[:5]
     if kind=='pen':return pen_path(mark).boundingRect()
+    if kind=='highlighter':return highlighter_path(mark).boundingRect()
     if kind=='mask':return mosaic_path(mark).boundingRect()
+    if kind=='step':
+        r=max(12,style_of(mark).get('size',28))/2
+        return QRectF(start.x()-r,start.y()-r,r*2,r*2)
     if kind=='text':
         font=QFont('Microsoft YaHei');font.setPixelSize(style_of(mark).get('size',22))
         return QFontMetricsF(font).boundingRect(QRectF(start.x(),start.y(),max(1,image_size.width()-start.x()),
@@ -66,6 +85,17 @@ def draw_annotation(painter,mark,image_size=None,mosaic=None):
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform,False)
             painter.drawImage(QPointF(),mosaic);painter.restore()
     elif kind=='pen':painter.fillPath(pen_path(mark),QColor(color))
+    elif kind=='highlighter':
+        fill=QColor(color);fill.setAlpha(110)
+        painter.fillPath(highlighter_path(mark),fill)
+    elif kind=='step':
+        radius=max(12,style.get('size',28))/2
+        painter.setPen(QPen(QColor('#ffffff'),2))
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(start,radius,radius)
+        font=QFont('Microsoft YaHei UI');font.setPixelSize(max(11,round(radius*1.15)));font.setBold(True)
+        painter.setFont(font);painter.setPen(QColor('#ffffff'))
+        painter.drawText(QRectF(start.x()-radius,start.y()-radius,radius*2,radius*2),Qt.AlignmentFlag.AlignCenter,text or '1')
     elif kind=='rectangle':painter.drawRect(QRectF(start,end).normalized())
     elif kind=='arrow':
         painter.drawLine(start,end);angle=math.atan2(end.y()-start.y(),end.x()-start.x());length=max(14,width*4)

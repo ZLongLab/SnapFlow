@@ -6,8 +6,7 @@ from PySide6.QtCore import QPointF,QRect,QRectF
 from PySide6.QtGui import QColor,QImage
 from PySide6.QtWidgets import QApplication
 from PySide6.QtMultimedia import QAudioFormat
-from test_upgrade import Fixture
-from tests.gui_wait import settle_search
+from tests.capture_fixture import TempFixture as Fixture
 from document_assistant.video_audio import PcmTimeline
 from document_assistant.video_recording import RegionRecorder
 from document_assistant.screen_capture import CaptureController
@@ -66,7 +65,7 @@ class VideoAudioTests(Fixture):
         self.assertEqual(recorder.frames,0);recorder.discard()
 
     def test_audio_choice_syncs_overlays_and_reaches_countdown_then_cancel(self):
-        window=MainWindow(self.root/'settings');settle_search(window)
+        window=MainWindow(self.root/'settings')
         controller=CaptureController(window,activate=False)
         screens=[SimpleNamespace(geometry=lambda:QRect(0,0,800,600),availableGeometry=lambda:QRect(0,0,800,580)),
                  SimpleNamespace(geometry=lambda:QRect(-800,0,800,600),availableGeometry=lambda:QRect(-800,0,800,580))]

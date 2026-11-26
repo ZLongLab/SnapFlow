@@ -1,2 +1,2 @@
-"""DocumentAssistant: local document organization and screen capture."""
+"""SnapFlow: local screen capture, long screenshot, and screen recording."""
 __version__ = "0.23.4"

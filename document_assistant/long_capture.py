@@ -14,8 +14,8 @@ import uuid
 from fractions import Fraction
 from ctypes import wintypes
 from PySide6.QtCore import QAbstractNativeEventFilter, QObject, QRectF, Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QColor, QImage, QPainter, QPen
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from .capture_pixels import crop_selection
 from .long_stitch import VerticalStitcher
 from .video_ui import controls_position
@@ -83,7 +83,7 @@ class RegionOutline(QWidget):
     def __init__(self, region):
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowTransparentForInput)
-        self.setWindowTitle('长截图区域 · DocumentAssistant')
+        self.setWindowTitle('长截图区域 · SnapFlow')
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setGeometry(region.toAlignedRect().adjusted(-4, -4, 4, 4))
@@ -97,23 +97,45 @@ class LongControls(QWidget):
     finish_requested = Signal()
     cancel_requested = Signal()
     diagnostic_requested = Signal()
+    auto_scroll_toggled = Signal(bool)
 
     def __init__(self, hotkey):
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.setWindowTitle('正在采集长截图 · DocumentAssistant'); self.stopping = False
+        self.setWindowTitle('正在采集长截图 · SnapFlow'); self.stopping = False
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setStyleSheet('QWidget{background:#20292b;color:#edf5f0;font-family:"Microsoft YaHei UI";font-size:12px;border-radius:12px;}'
-                          'QLabel#longCount{font-size:15px;font-weight:600;color:#71f3c6;}'
-                          'QPushButton{padding:8px 14px;border:0;border-radius:8px;background:#354448;}'
-                          'QPushButton:hover{background:#42565a;} QPushButton#longFinish{background:#148968;color:white;font-weight:600;}')
-        layout = QVBoxLayout(self); layout.setContentsMargins(16, 12, 12, 12); layout.setSpacing(8)
-        top = QHBoxLayout(); self.count = QLabel('长截图 · 准备采集'); self.count.setObjectName('longCount'); top.addWidget(self.count)
-        top.addStretch(); cancel = QPushButton('取消'); cancel.clicked.connect(self.cancel_requested.emit); top.addWidget(cancel)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        card = QFrame(self)
+        card.setObjectName('longCard')
+        card.setStyleSheet(
+            'QFrame#longCard{background:#161e2e;border:1px solid #32425e;border-radius:14px;}'
+            'QLabel{color:#cbd9ea;font-family:"Microsoft YaHei UI";font-size:12px;background:transparent;border:0;}'
+            'QLabel#longCount{font-size:15px;font-weight:700;color:#60a5fa;}'
+            'QPushButton{padding:7px 13px;border:1px solid #32425e;border-radius:9px;background:#232e44;color:#e6eef8;font-family:"Microsoft YaHei UI";font-size:12px;font-weight:600;}'
+            'QPushButton:hover{background:#2d3b56;border-color:#60a5fa;}'
+            'QPushButton:disabled{color:#64748b;background:#1a2234;border-color:#263248;}'
+            'QPushButton#longAuto:checked{background:#0f766e;border-color:#14b8a6;color:#ffffff;}'
+            'QPushButton#longFinish{background:#2563eb;border-color:#3b82f6;color:#ffffff;}'
+            'QPushButton#longFinish:hover{background:#3b82f6;}'
+        )
+        outer.addWidget(card)
+        layout = QVBoxLayout(card); layout.setContentsMargins(16, 12, 14, 12); layout.setSpacing(8)
+        top = QHBoxLayout(); top.setSpacing(8)
+        self.count = QLabel('长截图 · 准备采集'); self.count.setObjectName('longCount'); top.addWidget(self.count)
+        top.addStretch()
+        self.auto_scroll_button = QPushButton('自动滚动')
+        self.auto_scroll_button.setObjectName('longAuto')
+        self.auto_scroll_button.setCheckable(True)
+        self.auto_scroll_button.setToolTip('自动向下滚动并拼接；移出选区或到达底部后自动停止')
+        self.auto_scroll_button.toggled.connect(self.auto_scroll_toggled.emit)
+        top.addWidget(self.auto_scroll_button)
+        cancel = QPushButton('取消'); cancel.clicked.connect(self.cancel_requested.emit); top.addWidget(cancel)
         self.finish_button = QPushButton('完成采集'); self.finish_button.setObjectName('longFinish')
         self.finish_button.clicked.connect(self.finish_requested.emit); top.addWidget(self.finish_button); layout.addLayout(top)
-        self.status = QLabel('在选区内向上或向下滚动，自动拼接新内容')
+        self.status = QLabel('在选区内手动滚动，或点击「自动滚动」')
         self.status.setWordWrap(True); layout.addWidget(self.status)
-        hint = QLabel(hotkey + ' 完成采集  ·  只框选正文，避开固定导航'); layout.addWidget(hint)
+        hint = QLabel(hotkey + ' 完成采集  ·  支持固定顶栏/底栏自动去重'); layout.addWidget(hint)
         diagnostic_row = QHBoxLayout()
         self.diagnostic_hint = QLabel('断接时可保存诊断，便于排查')
         diagnostic_row.addWidget(self.diagnostic_hint); diagnostic_row.addStretch()
@@ -121,7 +143,7 @@ class LongControls(QWidget):
         self.diagnostic_button.setToolTip('保存断接前后的选区画面、短序列与已采集长图到本机；不会上传')
         self.diagnostic_button.clicked.connect(self.diagnostic_requested.emit)
         diagnostic_row.addWidget(self.diagnostic_button); layout.addLayout(diagnostic_row)
-        self.setFixedWidth(460); self.adjustSize()
+        self.setFixedWidth(480); self.adjustSize()
 
     def closeEvent(self, event):
         if not self.stopping:
@@ -133,8 +155,9 @@ class LiveLongPreview(QWidget):
     """Read-only live miniature; shares existing parts without full-image copies."""
     def __init__(self):
         super().__init__(None,Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint|Qt.WindowType.WindowTransparentForInput)
-        self.setWindowTitle('长截图实时预览 · DocumentAssistant')
+        self.setWindowTitle('长截图实时预览 · SnapFlow')
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.parts=[];self.total=1;self.source_width=1;self.viewport=(0,1)
         self.max_display_height=480
@@ -146,16 +169,21 @@ class LiveLongPreview(QWidget):
         self.viewport=(stitcher.position-stitcher.top,stitcher.previous.height());self.update()
 
     def paintEvent(self,event):
-        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        p.fillRect(self.rect(),QColor('#172a3b'));p.setPen(QColor('#e8f2fa'))
-        p.drawText(10,24,'长图实时预览')
+        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        clip=QPainterPath();clip.addRoundedRect(QRectF(self.rect()),12,12)
+        p.setClipPath(clip)
+        p.fillRect(self.rect(),QColor('#161e2e'))
+        p.setPen(QColor('#eef5fc'))
+        p.drawText(12,24,'长图实时预览')
         scale=min((self.width()-16)/self.source_width,(self.height()-60)/self.total)
         x=(self.width()-self.source_width*scale)/2;y=36.
         for part in self.parts:
             p.drawImage(QRectF(x,y,part.width()*scale,part.height()*scale),part);y+=part.height()*scale
-        p.setBrush(Qt.BrushStyle.NoBrush);p.setPen(QPen(QColor('#80d5ff'),2))
+        p.setBrush(Qt.BrushStyle.NoBrush);p.setPen(QPen(QColor('#60a5fa'),2))
         p.drawRect(QRectF(x,36+self.viewport[0]*scale,self.source_width*scale,self.viewport[1]*scale))
-        p.setPen(QColor('#b9cfdf'));p.drawText(8,self.height()-10,f'{self.source_width} × {self.total} px');p.end()
+        p.setPen(QColor('#94a7c0'));p.drawText(10,self.height()-10,f'{self.source_width} × {self.total} px')
+        p.setPen(QPen(QColor('#32425e'),1));p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5,0.5,-0.5,-0.5),12,12)
+        p.end()
 
 
 class LongCaptureSession(QObject):
@@ -163,9 +191,9 @@ class LongCaptureSession(QObject):
     cancelled = Signal()
     failed = Signal(str)
 
-    def __init__(self, screen, rect, hotkey, parent=None, grabber=None, initial_frame=None):
+    def __init__(self, screen, rect, hotkey, parent=None, grabber=None, initial_frame=None, wheel_scroller=None):
         super().__init__(parent); self.screen = screen; self.rect = QRectF(rect); self.geometry = screen.geometry()
-        self.grabber = grabber; self.stitcher = None; self.pending = None; self.done = False
+        self.grabber = grabber; self.wheel_scroller = wheel_scroller; self.stitcher = None; self.pending = None; self.done = False
         self.trace = deque(maxlen=90); self.diagnostic_failure = None
         self.diagnostic_frames = deque(maxlen=6)
         self.started_at = time.monotonic(); self.diagnostic_path = None
@@ -176,11 +204,47 @@ class LongCaptureSession(QObject):
         self.preview=LiveLongPreview();self.preview_updated=0.
         self.controls.finish_requested.connect(self.finish); self.controls.cancel_requested.connect(self.cancel)
         self.controls.diagnostic_requested.connect(self.save_diagnostics)
+        self.controls.auto_scroll_toggled.connect(self.set_auto_scroll)
         global_rect = QRectF(rect); global_rect.translate(self.geometry.topLeft())
         self.position = controls_position(screen.availableGeometry(), global_rect, self.controls.size())
         self.global_rect = global_rect
         self.timer = QTimer(self); self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.setInterval(16); self.timer.timeout.connect(self.poll)
+        self.auto_scrolling = False; self._auto_unchanged_ticks = 0
+        self._auto_timer = QTimer(self); self._auto_timer.setInterval(140); self._auto_timer.timeout.connect(self._auto_scroll_step)
+
+    def set_auto_scroll(self, enabled: bool):
+        if self.done:
+            enabled = False
+        self.auto_scrolling = bool(enabled)
+        self._auto_unchanged_ticks = 0
+        blocked = self.controls.auto_scroll_button.blockSignals(True)
+        self.controls.auto_scroll_button.setChecked(self.auto_scrolling)
+        self.controls.auto_scroll_button.blockSignals(blocked)
+        if self.auto_scrolling:
+            if self.wheel_scroller is None and sys.platform == 'win32':
+                try:
+                    c = self.global_rect.center()
+                    ctypes.windll.user32.SetCursorPos(int(c.x()), int(c.y()))
+                except Exception:
+                    pass
+            self._auto_timer.start()
+            self.controls.status.setText('正在自动向下滚动… 移出选区或点击按钮可暂停')
+        else:
+            self._auto_timer.stop()
+
+    def _auto_scroll_step(self):
+        if self.done or not self.auto_scrolling:
+            self._auto_timer.stop(); return
+        if self.wheel_scroller is not None:
+            self.wheel_scroller(); return
+        pos = QCursor.pos()
+        if not self.global_rect.adjusted(-24, -24, 24, 24).contains(pos.x(), pos.y()):
+            self.set_auto_scroll(False)
+            self.controls.status.setText('已暂停自动滚动（检测到鼠标移出）')
+            return
+        if sys.platform == 'win32':
+            ctypes.windll.user32.mouse_event(0x0800, 0, 0, ctypes.c_uint32(-240).value, 0)
 
     def frame(self):
         if self.screen.geometry() != self.geometry:
@@ -251,10 +315,21 @@ class LongCaptureSession(QObject):
                         'no_overlap': '检测到画面变化，但未能确认接缝；可保存诊断，回到最近位置继续',
                         'size_changed': '画面大小改变，已保留当前长图'}
             if result.status == 'limit':
-                self.finish('已达到长图大小上限，保留已采集内容'); return
+                self.set_auto_scroll(False); self.finish('已达到长图大小上限，保留已采集内容'); return
             if result.status == 'size_changed':
-                self.finish(messages[result.status]); return
-            self.controls.status.setText(messages[result.status]); self.update_count()
+                self.set_auto_scroll(False); self.finish(messages[result.status]); return
+            status_text = messages[result.status]
+            if self.auto_scrolling:
+                if result.status in ('appended', 'prepended'):
+                    self._auto_unchanged_ticks = 0
+                elif result.status == 'unchanged':
+                    self._auto_unchanged_ticks += 1
+                    if self._auto_unchanged_ticks >= 60:
+                        self.set_auto_scroll(False)
+                        status_text = '已到达页面底部，可点击「完成采集」'
+                elif result.status == 'no_overlap':
+                    self.set_auto_scroll(False)
+            self.controls.status.setText(status_text); self.update_count()
             now=time.monotonic()
             if now-self.preview_updated>=.12:
                 self.preview.refresh(self.stitcher);self.preview_updated=now
@@ -369,6 +444,8 @@ class LongCaptureSession(QObject):
 
     def teardown(self):
         self.timer.stop()
+        self._auto_timer.stop()
+        self.auto_scrolling = False
         self.preview.close();self.preview.deleteLater()
         if self.keys:
             self.keys.shutdown(); self.keys = None

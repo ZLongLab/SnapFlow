@@ -7,7 +7,7 @@ from PySide6.QtCore import QPoint,QPointF,QRect,QRectF,QSize,Qt
 from PySide6.QtGui import QColor,QImage
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
-from test_upgrade import Fixture
+from tests.capture_fixture import TempFixture as Fixture
 from document_assistant.selection_overlay import SelectionOverlay
 from document_assistant.video_recording import save_video,RegionRecorder
 from document_assistant.screen_capture import CaptureController

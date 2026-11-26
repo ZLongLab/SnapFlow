@@ -9,7 +9,7 @@ from .capture_canvas import AnnotationCanvas
 from .capture_markup import style_of
 from .capture_style import CAPTURE_QSS
 from .capture_tools import COLORS, normalize_tools
-from .presentation import line_icon
+from .capture_icons import line_icon
 from .selection_overlay import PANEL_STYLE
 
 

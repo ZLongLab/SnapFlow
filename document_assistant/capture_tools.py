@@ -3,9 +3,11 @@ import copy,json
 
 DEFAULT_TOOLS={
     'pen':{'color':'#e34f45','width':3},
+    'highlighter':{'color':'#ec9b21','width':6},
     'rectangle':{'color':'#e34f45','width':3},
     'arrow':{'color':'#e34f45','width':3},
     'text':{'color':'#e34f45','size':22},
+    'step':{'color':'#e34f45','size':28},
     'mask':{'brush':12,'block':6},
 }
 COLORS=('#e34f45','#ec9b21','#377fde','#24825c')
