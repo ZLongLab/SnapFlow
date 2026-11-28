@@ -1,7 +1,7 @@
 """Zoomable canvas with reversible annotation selection and editing."""
 import copy,math
 from PySide6.QtCore import QPointF,QRectF,Qt,Signal
-from PySide6.QtGui import QColor,QPainter,QPainterPath,QPen
+from PySide6.QtGui import QColor,QPainter,QPainterPath,QPen,QPixmap
 from PySide6.QtWidgets import QWidget,QInputDialog
 from .capture_markup import draw_annotation,render_annotations,mark_bounds,style_of,mosaic_path,pen_path,highlighter_path,pixelated_image
 
@@ -15,7 +15,7 @@ class AnnotationCanvas(QWidget):
         self.marks=[];self.tool='view';self.color='#e34f45';self.line_width=3;self.text_size=22
         self.start=self.end=None;self.zoom=None;self.pan=QPointF();self.drag_position=None
         self.selected_index=None;self.moving=None;self.move_before=None
-        self.history=[];self.future=[];self.cached_marks=None;self.cached_image=None
+        self.history=[];self.future=[];self.cached_marks=None;self.cached_image=None;self.cached_pixmap=None;self._drag_base_pixmap=None
         self.stroke=[];self.mosaic_key=None;self.mosaic_image=None
         self.brush_size=12;self.mosaic_block=6
     def image_rect(self):
@@ -42,7 +42,19 @@ class AnnotationCanvas(QWidget):
     def rendered(self):
         if self.cached_image is None or self.marks!=self.cached_marks:
             self.cached_image=render_annotations(self.image,self.marks);self.cached_marks=copy.deepcopy(self.marks)
+            self.cached_pixmap=None
         return self.cached_image
+    def rendered_pixmap(self):
+        img=self.rendered()
+        if self.cached_pixmap is None:
+            self.cached_pixmap=QPixmap.fromImage(img)
+            self.cached_pixmap.setDevicePixelRatio(1.0)
+        return self.cached_pixmap
+    def _prepare_drag_base(self,skip_index):
+        others=[m for i,m in enumerate(self.marks) if i!=skip_index]
+        base_img=render_annotations(self.image,others)
+        self._drag_base_pixmap=QPixmap.fromImage(base_img)
+        self._drag_base_pixmap.setDevicePixelRatio(1.0)
     def mosaic_source(self):
         key=(self.image.cacheKey(),self.mosaic_block)
         if self.mosaic_key!=key:
@@ -53,8 +65,15 @@ class AnnotationCanvas(QWidget):
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         clip=QPainterPath();clip.addRoundedRect(QRectF(self.rect()),14,14);p.setClipPath(clip);p.fillRect(self.rect(),QColor('#182630'))
         rect=self.image_rect();p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#0c1821'));p.drawRoundedRect(rect.adjusted(-5,-5,5,7),5,5)
-        p.fillRect(rect,QColor('white'));p.drawImage(rect,self.rendered())
+        p.fillRect(rect,QColor('white'))
+        if self.moving is not None and self._drag_base_pixmap is not None and self.selected_index is not None:
+            p.drawPixmap(rect,self._drag_base_pixmap,QRectF(self._drag_base_pixmap.rect()))
+        else:
+            pm=self.rendered_pixmap();p.drawPixmap(rect,pm,QRectF(pm.rect()))
         p.save();p.setClipRect(rect);p.translate(rect.topLeft());p.scale(self.scale(),self.scale())
+        if self.moving is not None and self.selected_index is not None and self.selected_index<len(self.marks):
+            mark=self.marks[self.selected_index]
+            draw_annotation(p,mark,self.image.size(),self.mosaic_source() if mark[0]=='mask' else None)
         if self.start is not None and self.end is not None:
             draw_annotation(p,self.new_mark(self.start,self.end),self.image.size(),self.mosaic_source() if self.tool=='mask' else None)
         if self.selected_index is not None and self.selected_index<len(self.marks):
@@ -98,7 +117,7 @@ class AnnotationCanvas(QWidget):
         if point is None:return
         if self.tool=='select':
             self.selected_index=self.pick(point);self.selection_changed.emit();self.update()
-            if self.selected_index is not None:self.moving=point;self.move_before=copy.deepcopy(self.marks)
+            if self.selected_index is not None:self.moving=point;self.move_before=copy.deepcopy(self.marks);self._prepare_drag_base(self.selected_index)
         elif self.tool=='text':
             text,ok=QInputDialog.getText(self,'添加文字','文字内容（最多 500 字）')
             if ok and text.strip():self.append_mark(self.new_mark(point,point,text[:500]))
@@ -126,7 +145,7 @@ class AnnotationCanvas(QWidget):
             self.drag_position=None;self.unsetCursor();return
         if event.button()!=Qt.MouseButton.LeftButton:return
         if self.moving is not None:
-            self.mouseMoveEvent(event);self.commit(self.marks,self.move_before);self.moving=self.move_before=None
+            self.mouseMoveEvent(event);self._drag_base_pixmap=None;self.commit(self.marks,self.move_before);self.moving=self.move_before=None
         elif self.start is not None:
             self.end=self.image_point(event.position()) or self.end
             if self.tool in ('pen','highlighter','mask') and self.end!=self.stroke[-1]:self.stroke.append(QPointF(self.end))

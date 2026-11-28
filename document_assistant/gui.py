@@ -9,9 +9,11 @@ from pathlib import Path
 from PySide6.QtCore import (
     QCoreApplication,
     QEvent,
+    QFileSystemWatcher,
     QLibraryInfo,
     QPointF,
     QRectF,
+    QSize,
     QStandardPaths,
     QTimer,
     QTranslator,
@@ -25,12 +27,14 @@ from PySide6.QtGui import (
     QFont,
     QIcon,
     QImage,
+    QKeySequence,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
     QRadialGradient,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,6 +45,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -50,6 +55,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
+from .capture_hud import CaptureHistory
 from .capture_icons import line_icon
 from .startup_registration import StartupRegistration
 from .windows_identity import ICON_PATH, apply_titlebar_theme, configure_process, tag_window
@@ -92,6 +98,7 @@ def _build_qss(theme_name: str) -> str:
             "status_border": "#232e42",
             "tip_bg": "#1f293d",
             "tip_border": "#475d80",
+            "del_hover": "#3f1d28",
         }
     else:
         t = {
@@ -128,6 +135,7 @@ def _build_qss(theme_name: str) -> str:
             "status_border": "#dce5f2",
             "tip_bg": "#0f172a",
             "tip_border": "#334155",
+            "del_hover": "#fee2e2",
         }
 
     return f"""
@@ -229,6 +237,10 @@ QPushButton#cardAction {{
     padding:4px 8px; font-size:11px; font-weight:600;
 }}
 QPushButton#cardAction:hover {{ background-color:{t['btn_hover']}; border-color:{t['btn_hover_border']}; color:{t['seg_active_text']}; }}
+QPushButton#cardDelete {{
+    background-color:transparent; border:1px solid transparent; border-radius:6px; padding:0;
+}}
+QPushButton#cardDelete:hover {{ background-color:{t['del_hover']}; border-color:#f87171; }}
 
 QFrame#emptyCard {{
     background-color:{t['empty_bg']}; border:1.5px dashed {t['empty_border']}; border-radius:18px;
@@ -413,7 +425,7 @@ class ThumbnailCanvas(QWidget):
 class GalleryCard(QFrame):
     """Rounded gallery card with thumbnail and 1-click quick actions."""
 
-    def __init__(self, path: Path, mtime: float, size_bytes: int, dark: bool, window: MainWindow, parent=None):
+    def __init__(self, path: Path, mtime: float, size_bytes: int, dark: bool, window: MainWindow, is_history: bool = False, parent=None):
         super().__init__(parent)
         self.setObjectName("galleryCard")
         is_video = path.suffix.lower() == ".mp4"
@@ -424,7 +436,7 @@ class GalleryCard(QFrame):
         layout.setSpacing(0)
 
         thumb = ThumbnailCanvas(path, is_video, size_bytes, dark, self)
-        thumb.clicked.connect(lambda p=path: window.open_path(p))
+        thumb.clicked.connect(lambda p=path: window.open_path(p) if is_video else window.pin_recent_image(p) if is_history else window.open_path(p))
         layout.addWidget(thumb)
 
         footer = QWidget(self)
@@ -441,8 +453,19 @@ class GalleryCard(QFrame):
         name_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         time_lbl = QLabel(datetime.fromtimestamp(mtime).strftime("%m-%d %H:%M"))
         time_lbl.setObjectName("cardTime")
+
+        del_btn = QPushButton()
+        del_btn.setObjectName("cardDelete")
+        del_btn.setFixedSize(22, 22)
+        del_btn.setIcon(line_icon("trash", "#94a7c0" if dark else "#64748b"))
+        del_btn.setIconSize(QSize(13, 13))
+        del_btn.setToolTip("移除该历史记录" if is_history else "删除文件")
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        del_btn.clicked.connect(lambda _=False, p=path, h=is_history: window.delete_recent_file(p, is_history=h))
+
         title_row.addWidget(name_lbl, 1)
         title_row.addWidget(time_lbl)
+        title_row.addWidget(del_btn)
         f_layout.addLayout(title_row)
 
         actions = QHBoxLayout()
@@ -450,14 +473,26 @@ class GalleryCard(QFrame):
         if is_video:
             for label, handler in (
                 ("播放", lambda p=path: window.open_path(p)),
+                ("复制文件", lambda p=path: window.copy_recent_file(p)),
                 ("所在目录", lambda p=path: window.open_path(p.parent)),
             ):
                 btn = QPushButton(label)
                 btn.setObjectName("cardAction")
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.clicked.connect(handler)
-                actions.addWidget(btn)
-            actions.addStretch(1)
+                actions.addWidget(btn, 1)
+        elif is_history:
+            for label, handler in (
+                ("复制", lambda p=path: window.copy_recent_image(p)),
+                ("贴图", lambda p=path: window.pin_recent_image(p)),
+                ("美化", lambda p=path: window.beautify_recent_image(p)),
+                ("保存", lambda p=path: window.save_history_image(p)),
+            ):
+                btn = QPushButton(label)
+                btn.setObjectName("cardAction")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(handler)
+                actions.addWidget(btn, 1)
         else:
             for label, handler in (
                 ("复制", lambda p=path: window.copy_recent_image(p)),
@@ -486,9 +521,17 @@ class MainWindow(QMainWindow):
         self._gallery_cards = []
         self.empty_title = None
         self.theme_name = self._load_theme()
+        self._watched_dirs = set()
+
+        self._fs_watcher = QFileSystemWatcher(self)
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setSingleShot(True)
+        self._watch_timer.setInterval(260)
+        self._watch_timer.timeout.connect(self.refresh_recent)
+        self._fs_watcher.directoryChanged.connect(lambda _path: self._watch_timer.start())
 
         self.setWindowTitle(f"SnapFlow · 轻截录屏 · {__version__}")
-        self.resize(980, 640)
+        self.resize(1000, 650)
         self.setMinimumSize(780, 520)
 
         self.backdrop = StudioBackdrop(self)
@@ -503,7 +546,11 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(self.backdrop)
         self.statusBar().setSizeGripEnabled(False)
-        self.statusBar().showMessage("托盘常驻 · 关闭窗口后快捷键保持生效")
+        self.statusBar().showMessage("托盘常驻 · Ctrl+V 可粘贴剪贴板图片进行贴图/美化/标注")
+
+        paste_sc = QShortcut(QKeySequence("Ctrl+V"), self)
+        paste_sc.activated.connect(self.paste_from_clipboard)
+
         self.apply_theme(self.theme_name, persist=False)
 
     def _ui_path(self) -> Path:
@@ -549,6 +596,7 @@ class MainWindow(QMainWindow):
         self.theme_button.setIcon(line_icon("sun" if dark else "moon", muted_ink))
         self.theme_button.setToolTip("切换到晨雾浅色" if dark else "切换到深蓝暗色")
         self.directory_button.setIcon(line_icon("folder", "#60a5fa" if dark else "#2563eb"))
+        self.paste_clip_btn.setIcon(line_icon("pin", "#60a5fa" if dark else "#2563eb"))
         self.beautify_pick.setIcon(line_icon("sparkle", "#c4b5fd" if dark else "#7c3aed"))
         self.refresh_btn.setIcon(line_icon("refresh", muted_ink))
 
@@ -574,7 +622,7 @@ class MainWindow(QMainWindow):
         self.hotkey_badge = QPushButton("Alt+S")
         self.hotkey_badge.setObjectName("hotkeyBadge")
         self.hotkey_badge.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.hotkey_badge.setToolTip("点击修改截图快捷键与保存目录")
+        self.hotkey_badge.setToolTip("点击打开设置与快捷键")
         self.hotkey_badge.clicked.connect(self.screenshot_settings)
         layout.addWidget(self.hotkey_badge)
 
@@ -631,14 +679,14 @@ class MainWindow(QMainWindow):
         self.cfg_btn = QPushButton()
         self.cfg_btn.setObjectName("iconBtn")
         self.cfg_btn.setFixedSize(34, 34)
-        self.cfg_btn.setToolTip("截图设置与快捷键")
+        self.cfg_btn.setToolTip("设置与快捷键")
         self.cfg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cfg_btn.clicked.connect(self.screenshot_settings)
 
         self.startup_button = QPushButton()
         self.startup_button.setObjectName("iconBtn")
         self.startup_button.setFixedSize(34, 34)
-        self.startup_button.setToolTip("开机自启动设置")
+        self.startup_button.setToolTip("开机自启动与运行设置")
         self.startup_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.startup_button.clicked.connect(self.show_settings)
 
@@ -667,7 +715,7 @@ class MainWindow(QMainWindow):
         self.filter_group = QButtonGroup(self)
         self.filter_group.setExclusive(True)
         self.filter_buttons = {}
-        for key, label in (("all", "全部"), ("image", "截图"), ("video", "录屏")):
+        for key, label in (("all", "全部"), ("image", "截图"), ("video", "录屏"), ("history", "剪贴历史")):
             btn = QPushButton(label)
             btn.setObjectName("filterTab")
             btn.setCheckable(True)
@@ -691,6 +739,12 @@ class MainWindow(QMainWindow):
 
         row.addStretch(1)
 
+        self.paste_clip_btn = QPushButton("贴图剪贴板")
+        self.paste_clip_btn.setObjectName("subtleBoxBtn")
+        self.paste_clip_btn.setToolTip("直接把剪贴板里的图片贴到桌面，或在窗口内按 Ctrl+V 选择操作")
+        self.paste_clip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.paste_clip_btn.clicked.connect(self.pin_from_clipboard)
+
         self.beautify_pick = QPushButton("美化图片")
         self.beautify_pick.setObjectName("subtleBoxBtn")
         self.beautify_pick.setToolTip("选择本地截图进行渐变套壳美化")
@@ -702,6 +756,7 @@ class MainWindow(QMainWindow):
         self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_btn.clicked.connect(lambda _=False: self.refresh_recent())
 
+        row.addWidget(self.paste_clip_btn)
         row.addWidget(self.beautify_pick)
         row.addWidget(self.refresh_btn)
         return row
@@ -721,8 +776,23 @@ class MainWindow(QMainWindow):
         self.gallery_scroll.setWidget(self.gallery_host)
         return self.gallery_scroll
 
+    def _sync_directory_watcher(self):
+        desired = set()
+        if self._directory_path and self._directory_path.is_dir():
+            desired.add(str(self._directory_path))
+        hist_dir = self.home / "history"
+        if hist_dir.is_dir():
+            desired.add(str(hist_dir))
+        to_remove = self._watched_dirs - desired
+        if to_remove:
+            self._fs_watcher.removePaths(list(to_remove))
+        to_add = desired - self._watched_dirs
+        if to_add:
+            self._fs_watcher.addPaths(list(to_add))
+        self._watched_dirs = desired
+
     def set_gallery_filter(self, kind: str):
-        if kind not in ("all", "image", "video"):
+        if kind not in ("all", "image", "video", "history"):
             kind = "all"
         self.current_filter = kind
         if kind in self.filter_buttons:
@@ -755,7 +825,7 @@ class MainWindow(QMainWindow):
         if ctrl is not None:
             return dict(ctrl.settings)
         desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
-        settings = {"hotkey": "Alt+S", "directory": desktop or str(Path.home() / "Desktop")}
+        settings = {"hotkey": "Alt+S", "directory": desktop or str(Path.home() / "Desktop"), "save_copy_history": True}
         config_path = self.home / "screenshot.json"
         try:
             if config_path.exists():
@@ -764,6 +834,8 @@ class MainWindow(QMainWindow):
                     settings["hotkey"] = saved["hotkey"].strip()
                 if isinstance(saved.get("directory"), str) and Path(saved["directory"]).is_absolute():
                     settings["directory"] = saved["directory"]
+                if isinstance(saved.get("save_copy_history"), bool):
+                    settings["save_copy_history"] = saved["save_copy_history"]
         except Exception:
             pass
         return settings
@@ -773,6 +845,7 @@ class MainWindow(QMainWindow):
         settings = self._configured_settings(ctrl)
         directory = Path(settings["directory"]).resolve()
         self._directory_path = directory
+        self._sync_directory_watcher()
         folder_label = directory.name or str(directory)
         self.directory_button.setText(folder_label)
         self.directory_button.setToolTip(f"当前保存目录（点击打开）：\n{directory}")
@@ -824,26 +897,31 @@ class MainWindow(QMainWindow):
             else:
                 hotkey_active = True
 
-        directory = self._directory_path or Path(self._configured_settings()["directory"]).resolve()
+        self._sync_directory_watcher()
+        is_history = self.current_filter == "history"
         entries = []
-        if directory.is_dir():
-            try:
-                for child in directory.iterdir():
-                    if not child.is_file():
-                        continue
-                    ext = child.suffix.lower()
-                    if ext not in (".png", ".mp4"):
-                        continue
-                    if self.current_filter == "image" and ext != ".png":
-                        continue
-                    if self.current_filter == "video" and ext != ".mp4":
-                        continue
-                    stat = child.stat()
-                    entries.append((stat.st_mtime, stat.st_size, child))
-            except OSError:
-                entries = []
+        if is_history:
+            entries = CaptureHistory(self.home).entries()
+        else:
+            directory = self._directory_path or Path(self._configured_settings()["directory"]).resolve()
+            if directory.is_dir():
+                try:
+                    for child in directory.iterdir():
+                        if not child.is_file():
+                            continue
+                        ext = child.suffix.lower()
+                        if ext not in (".png", ".mp4"):
+                            continue
+                        if self.current_filter == "image" and ext != ".png":
+                            continue
+                        if self.current_filter == "video" and ext != ".mp4":
+                            continue
+                        stat = child.stat()
+                        entries.append((stat.st_mtime, stat.st_size, child))
+                except OSError:
+                    entries = []
+            entries.sort(key=lambda item: item[0], reverse=True)
 
-        entries.sort(key=lambda item: item[0], reverse=True)
         items = entries[:18]
         self.recent_count.setText(f"最近 {len(items)} 项" if items else "暂无记录")
 
@@ -861,18 +939,28 @@ class MainWindow(QMainWindow):
             icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             e_layout.addWidget(icon_lbl)
 
-            title_text = (
-                f"按下 {hotkey}，捕获你的第一张画面"
-                if (hotkey_active and self.current_filter != "video")
-                else "当前分类下还没有记录"
-            )
+            if is_history:
+                hist_enabled = self._configured_settings().get("save_copy_history", True)
+                title_text = "还没有暂存的剪贴历史" if hist_enabled else "已关闭复制时暂存剪贴历史"
+                sub_text = (
+                    "复制截图后会自动在本机运行目录 history 暂存最近 20 张（可在设置中随时关闭或清空）"
+                    if hist_enabled
+                    else "当前「仅复制」不会向磁盘写入任何文件；如需防覆盖找回，可在设置中开启"
+                )
+            elif hotkey_active and self.current_filter != "video":
+                title_text = f"按下 {hotkey}，捕获你的第一张画面"
+                sub_text = "支持智能窗口吸附、框选标注、滚动长截图、区域录屏与桌面原位贴图"
+            else:
+                title_text = "当前分类下还没有记录"
+                sub_text = "支持框选标注、滚动长截图、区域录屏与桌面悬浮贴图"
+
             title = QLabel(title_text)
             title.setObjectName("emptyTitle")
             title.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.empty_title = title
             e_layout.addWidget(title)
 
-            sub = QLabel("支持框选标注、滚动长截图、区域录屏与桌面悬浮贴图")
+            sub = QLabel(sub_text)
             sub.setObjectName("emptySub")
             sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
             e_layout.addWidget(sub)
@@ -881,7 +969,7 @@ class MainWindow(QMainWindow):
             tiles_row.setSpacing(10)
             tiles_row.addStretch(1)
             for label, obj_name, handler in (
-                ("框选标注 · 序号/荧光笔", "featureTileBlue", self.take_screenshot),
+                ("框选标注 · 窗口吸附", "featureTileBlue", self.take_screenshot),
                 ("滚动长截图 · 自动拼接", "featureTileGreen", self.take_long_screenshot),
                 ("区域录屏 · 电脑声音", "featureTileViolet", self.take_video_recording),
                 ("美化套壳 · 渐变圆角", "featureTileAmber", self.beautify_from_file),
@@ -912,7 +1000,7 @@ class MainWindow(QMainWindow):
             return
 
         for idx, (mtime, size_bytes, path) in enumerate(items):
-            card = GalleryCard(path, mtime, size_bytes, dark, self)
+            card = GalleryCard(path, mtime, size_bytes, dark, self, is_history=is_history)
             self._gallery_cards.append(card)
             self.gallery_layout.addWidget(card, idx // 3, idx % 3)
         for col in range(3):
@@ -936,19 +1024,87 @@ class MainWindow(QMainWindow):
             return
         try:
             from .screen_capture import copy_image
-
             copy_image(image)
         except Exception as exc:
             QMessageBox.warning(self, "复制失败", str(exc))
             return
         self.statusBar().showMessage(f"已复制到剪贴板：{path.name}", 6000)
 
+    def copy_recent_file(self, path: Path):
+        try:
+            from .screen_capture import copy_file_to_clipboard
+            copy_file_to_clipboard(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "复制文件失败", str(exc))
+            return
+        self.statusBar().showMessage(f"已复制文件，可直接 Ctrl+V 发送：{path.name}", 6000)
+
+    def save_history_image(self, path: Path):
+        image = self._load_image_or_warn(path)
+        if image is None:
+            return
+        try:
+            from .screen_capture import save_png
+            target_dir = self._directory_path or Path(self._configured_settings()["directory"]).resolve()
+            saved = save_png(image, target_dir)
+            if self.capture_controller:
+                self.capture_controller.last_saved = saved
+        except Exception as exc:
+            QMessageBox.warning(self, "保存失败", str(exc))
+            return
+        self.statusBar().showMessage(f"已保存到 {saved}", 6000)
+        self.refresh_recent()
+
+    def delete_recent_file(self, path: Path, *, is_history: bool = False):
+        if is_history:
+            CaptureHistory(self.home).delete(path)
+            self.statusBar().showMessage(f"已移除历史记录：{path.name}", 4000)
+            self.refresh_recent()
+            return
+        reply = QMessageBox.question(
+            self,
+            "删除文件",
+            f"确定永久删除该文件？\n{path.name}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(self, "删除失败", str(exc))
+            return
+        self.statusBar().showMessage(f"已删除：{path.name}", 5000)
+        self.refresh_recent()
+
     def pin_recent_image(self, path: Path):
         image = self._load_image_or_warn(path)
         if image is None:
             return
         self.ensure_capture().pin_image(image)
-        self.statusBar().showMessage(f"已贴到桌面：{path.name}（拖动移动 · 滚轮缩放 · 双击关闭）", 6000)
+        self.statusBar().showMessage(f"已贴到桌面：{path.name}（拖动移动 · 滚轮缩放 · 双击收起 · Esc 关闭）", 6000)
+
+    def pin_from_clipboard(self):
+        self.ensure_capture().pin_clipboard()
+
+    def paste_from_clipboard(self):
+        image = QApplication.clipboard().image()
+        if image.isNull():
+            self.statusBar().showMessage("剪贴板中没有图片", 4000)
+            return
+        menu = QMenu(self)
+        act_pin = menu.addAction("贴到桌面")
+        act_beautify = menu.addAction("美化套壳")
+        act_edit = menu.addAction("标注编辑")
+        chosen = menu.exec(self.mapToGlobal(self.rect().center()))
+        ctrl = self.ensure_capture()
+        if chosen is act_pin:
+            ctrl.pin_image(image)
+        elif chosen is act_beautify:
+            ctrl.beautify_image(image)
+        elif chosen is act_edit:
+            ctrl.edit_image(image)
 
     def beautify_recent_image(self, path: Path):
         image = self._load_image_or_warn(path)
@@ -994,7 +1150,6 @@ class MainWindow(QMainWindow):
     def ensure_capture(self):
         if self.capture_controller is None:
             from .screen_capture import CaptureController
-
             self.capture_controller = CaptureController(self)
         return self.capture_controller
 
@@ -1013,16 +1168,16 @@ class MainWindow(QMainWindow):
         self.ensure_capture().show_settings()
 
     def show_settings(self):
-        from .settings_dialog import SettingsDialog
-
-        SettingsDialog(self).exec()
+        self.ensure_capture().show_settings()
         self.refresh_summary()
 
     def closeEvent(self, event):
         capture = self.capture_controller
         if capture and capture.tray and not capture.exiting:
             self.hide()
-            capture.notify("已在托盘运行", "截图快捷键 " + capture.settings["hotkey"] + "；托盘菜单可退出程序")
+            if not getattr(capture, '_tray_close_notified', False):
+                capture._tray_close_notified = True
+                capture.notify("已在托盘运行", "快捷键 " + capture.settings["hotkey"] + " · 单击托盘图标可重新打开")
             event.ignore()
             return
         self.closing = True

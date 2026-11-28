@@ -1,46 +1,121 @@
-"""Shared native screenshot editor and settings styling."""
+"""Shared Mist Light & Slate Dark styling for CaptureEditor, LongImageEditor, and VideoPreview."""
 from pathlib import Path
-CAPTURE_QSS = """
-QDialog { background:#f7f4eb; }
-QWidget { font-family:'Microsoft YaHei UI'; font-size:13px; color:#25382f; }
-QFrame#captureHeader { background:#fffdf9; border-bottom:1px solid #e5ebe7; }
-QLabel#captureTitle { font-size:20px; font-weight:700; color:#16372b; }
-QLabel#captureMeta { color:#76847b; font-size:12px; }
-QLabel#captureBadge { color:#148263; background:#e2f6ee; padding:7px 12px; border-radius:9px; font-size:12px; }
-QFrame#toolGroup { background:#eef3f0; border-radius:12px; }
-QPushButton { background:#ffffff; border:1px solid #dce5df; border-radius:10px; padding:9px 15px; }
-QPushButton:hover { background:#f0f6f2; border-color:#a2c3b0; }
-QPushButton:pressed { background:#e1f1e8; }
-QPushButton:focus { border-color:#199a75; }
-QPushButton:disabled { color:#a4afa8; background:#f3f5f3; border-color:#e8ece9; }
-QPushButton#zoomButton { padding:6px 8px; font-size:12px; }
-QPushButton#tool { border:1px solid transparent; background:transparent; border-radius:9px; padding:7px 8px; }
-QPushButton#tool:hover { background:#e2ece6; }
-QPushButton#tool:checked { background:#ffffff; border-color:#dbe8df; color:#11825f; font-weight:600; }
-QPushButton#copyCapture { background:#16795f; border-color:#16795f; color:#ffffff; font-weight:600; padding:11px 22px; }
-QPushButton#copyCapture:hover { background:#0d8865; border-color:#0d8865; }
-QPushButton#copyCapture:pressed { background:#086c50; }
-QPushButton#copyCapture:disabled { background:#a6c9b9; border-color:#a6c9b9; color:#edf5f0; }
-QPushButton#cancelCapture { background:transparent; border-color:transparent; color:#738177; }
-QPushButton#cancelCapture:hover { background:#f0f3f0; color:#30473a; }
-QLabel#capturePath { color:#506356; font-size:12px; }
-QLabel#captureHint { color:#667068; font-size:11px; }
-QLabel#captureError { color:#aa543c; background:#fff1e8; border-radius:8px; padding:8px 12px; }
-QLineEdit { background:#ffffff; border:1px solid #dce5df; padding:10px 12px; border-radius:9px; selection-background-color:#189970; }
-QLineEdit:focus { border-color:#189970; }
-QSpinBox { background:#fffdf9; border:1px solid #dce5df; border-radius:8px; padding:5px 18px 5px 6px; font-size:12px; min-height:20px; }
-QSpinBox:focus { border-color:#16795f; }
-QSpinBox::up-button { subcontrol-origin:border; subcontrol-position:top right; width:16px; border:0; background:#edf2e9; border-top-right-radius:8px; }
-QSpinBox::down-button { subcontrol-origin:border; subcontrol-position:bottom right; width:16px; border:0; background:#edf2e9; border-bottom-right-radius:8px; }
-QScrollArea { border:0; background:transparent; }
-QPushButton#filterChip { background:#e9f3ec; color:#17604a; padding:5px 9px; }
-QWidget#captureCanvas { background:transparent; }
-QToolTip { background:#173c2e; color:#ffffff; border:0; padding:7px 10px; }
+
+_CHEVRON_UP = Path(__file__).with_name('chevron-up.svg').as_posix()
+_CHEVRON_DOWN = Path(__file__).with_name('chevron-down.svg').as_posix()
+
+
+def build_capture_qss(dark: bool = False) -> str:
+    if dark:
+        t = {
+            'bg': '#131926',
+            'surface': '#1a2233',
+            'border': '#2b3850',
+            'text': '#eef5fc',
+            'title': '#f1f5f9',
+            'muted': '#94a7c0',
+            'badge_bg': '#202e47',
+            'badge_fg': '#93c5fd',
+            'group_bg': '#172031',
+            'btn_bg': '#232e44',
+            'btn_hover': '#2a3853',
+            'btn_pressed': '#1e293b',
+            'btn_border': '#33435e',
+            'btn_hover_border': '#60a5fa',
+            'disabled_fg': '#64748b',
+            'disabled_bg': '#182032',
+            'tool_hover': '#26344d',
+            'tool_checked_bg': '#26344d',
+            'tool_checked_border': '#4c72a8',
+            'tool_checked_fg': '#ffffff',
+            'primary': '#2563eb',
+            'primary_hover': '#3b82f6',
+            'primary_pressed': '#1d4ed8',
+            'primary_disabled': '#334155',
+            'cancel_fg': '#94a7c0',
+            'cancel_hover': '#232e44',
+            'err_bg': '#3b1d24',
+            'err_fg': '#fca5a5',
+            'input_bg': '#1d2638',
+            'spin_btn': '#26344d',
+            'tip_bg': '#1f293d',
+        }
+    else:
+        t = {
+            'bg': '#f3f6fb',
+            'surface': '#ffffff',
+            'border': '#dce5f2',
+            'text': '#0f172a',
+            'title': '#0f172a',
+            'muted': '#64748b',
+            'badge_bg': '#eff6ff',
+            'badge_fg': '#2563eb',
+            'group_bg': '#eef3f9',
+            'btn_bg': '#ffffff',
+            'btn_hover': '#eff6ff',
+            'btn_pressed': '#dbeafe',
+            'btn_border': '#d6e0ee',
+            'btn_hover_border': '#60a5fa',
+            'disabled_fg': '#94a3b8',
+            'disabled_bg': '#f1f5f9',
+            'tool_hover': '#e2ebf6',
+            'tool_checked_bg': '#ffffff',
+            'tool_checked_border': '#bfdbfe',
+            'tool_checked_fg': '#2563eb',
+            'primary': '#2563eb',
+            'primary_hover': '#3b82f6',
+            'primary_pressed': '#1d4ed8',
+            'primary_disabled': '#93c5fd',
+            'cancel_fg': '#64748b',
+            'cancel_hover': '#e2e8f0',
+            'err_bg': '#fef2f2',
+            'err_fg': '#b91c1c',
+            'input_bg': '#ffffff',
+            'spin_btn': '#eef3f9',
+            'tip_bg': '#0f172a',
+        }
+
+    return f"""
+QDialog {{ background:{t['bg']}; }}
+QWidget {{ font-family:'Microsoft YaHei UI'; font-size:13px; color:{t['text']}; }}
+QFrame#captureHeader {{ background:{t['surface']}; border-bottom:1px solid {t['border']}; }}
+QLabel#captureTitle {{ font-size:19px; font-weight:700; color:{t['title']}; background:transparent; }}
+QLabel#captureMeta {{ color:{t['muted']}; font-size:12px; background:transparent; }}
+QLabel#captureBadge {{ color:{t['badge_fg']}; background:{t['badge_bg']}; padding:6px 12px; border-radius:9px; font-size:12px; font-weight:600; }}
+QFrame#toolGroup {{ background:{t['group_bg']}; border-radius:12px; }}
+QPushButton {{ background:{t['btn_bg']}; color:{t['text']}; border:1px solid {t['btn_border']}; border-radius:10px; padding:8px 14px; font-weight:500; }}
+QPushButton:hover {{ background:{t['btn_hover']}; border-color:{t['btn_hover_border']}; }}
+QPushButton:pressed {{ background:{t['btn_pressed']}; }}
+QPushButton:focus {{ border-color:#3b82f6; }}
+QPushButton:disabled {{ color:{t['disabled_fg']}; background:{t['disabled_bg']}; border-color:{t['border']}; }}
+QPushButton#zoomButton {{ padding:6px 8px; font-size:12px; }}
+QPushButton#tool {{ border:1px solid transparent; background:transparent; border-radius:9px; padding:7px 8px; }}
+QPushButton#tool:hover {{ background:{t['tool_hover']}; }}
+QPushButton#tool:checked {{ background:{t['tool_checked_bg']}; border-color:{t['tool_checked_border']}; color:{t['tool_checked_fg']}; font-weight:600; }}
+QPushButton#copyCapture {{ background:{t['primary']}; border-color:{t['primary']}; color:#ffffff; font-weight:600; padding:10px 20px; }}
+QPushButton#copyCapture:hover {{ background:{t['primary_hover']}; border-color:{t['primary_hover']}; }}
+QPushButton#copyCapture:pressed {{ background:{t['primary_pressed']}; }}
+QPushButton#copyCapture:disabled {{ background:{t['primary_disabled']}; border-color:{t['primary_disabled']}; color:#e2e8f0; }}
+QPushButton#cancelCapture {{ background:transparent; border-color:transparent; color:{t['cancel_fg']}; }}
+QPushButton#cancelCapture:hover {{ background:{t['cancel_hover']}; color:{t['text']}; }}
+QPushButton#saveCapture {{ background:{t['btn_bg']}; border-color:{t['btn_border']}; color:{t['text']}; font-size:12px; font-weight:600; padding:8px 12px; }}
+QPushButton#saveCapture:hover {{ color:{t['badge_fg']}; background:{t['btn_hover']}; border-color:{t['btn_hover_border']}; }}
+QLabel#capturePath {{ color:{t['muted']}; font-size:12px; background:transparent; }}
+QLabel#captureHint {{ color:{t['muted']}; font-size:11px; background:transparent; }}
+QLabel#captureError {{ color:{t['err_fg']}; background:{t['err_bg']}; border-radius:8px; padding:8px 12px; }}
+QLineEdit {{ background:{t['input_bg']}; color:{t['text']}; border:1px solid {t['btn_border']}; padding:9px 12px; border-radius:9px; selection-background-color:#2563eb; }}
+QLineEdit:focus {{ border-color:#3b82f6; }}
+QSpinBox {{ background:{t['input_bg']}; color:{t['text']}; border:1px solid {t['btn_border']}; border-radius:8px; padding:4px 18px 4px 6px; font-size:12px; min-height:20px; }}
+QSpinBox:focus {{ border-color:#3b82f6; }}
+QSpinBox::up-button {{ subcontrol-origin:border; subcontrol-position:top right; width:16px; border:0; background:{t['spin_btn']}; border-top-right-radius:8px; }}
+QSpinBox::down-button {{ subcontrol-origin:border; subcontrol-position:bottom right; width:16px; border:0; background:{t['spin_btn']}; border-bottom-right-radius:8px; }}
+QSpinBox::up-arrow {{ width:10px; height:10px; image:url("{_CHEVRON_UP}"); }}
+QSpinBox::down-arrow {{ width:10px; height:10px; image:url("{_CHEVRON_DOWN}"); }}
+QScrollArea {{ border:0; background:transparent; }}
+QPushButton#filterChip {{ background:{t['badge_bg']}; color:{t['badge_fg']}; padding:5px 9px; }}
+QWidget#captureCanvas {{ background:transparent; }}
+QToolTip {{ background:{t['tip_bg']}; color:#f8fafc; border:1px solid #334155; padding:6px 9px; border-radius:8px; }}
 """
 
-CAPTURE_QSS += """
-QPushButton#saveCapture { background:transparent; border-color:transparent; color:#6a8273; font-size:12px; font-weight:400; padding:9px 6px; }
-QPushButton#saveCapture:hover { color:#0c8967; background:#e8f6ee; }
-QPushButton#saveCapture:focus { border-color:#87bba1; }
-"""
-CAPTURE_QSS += '\nQSpinBox::up-arrow { width:10px; height:10px; image:url("' + Path(__file__).with_name('chevron-up.svg').as_posix() + '"); }\nQSpinBox::down-arrow { width:10px; height:10px; image:url("' + Path(__file__).with_name('chevron-down.svg').as_posix() + '"); }\n'
+
+CAPTURE_QSS = build_capture_qss(False)

@@ -1,11 +1,12 @@
-"""CleanShot-style screenshot beautifier: gradient backdrops, rounded shadow, aspect ratio & window chrome."""
+"""CleanShot-style screenshot beautifier: persistent presets, fast slider preview, rounded shadow, ratio & window chrome."""
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
+from PySide6.QtGui import QColor, QImage, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -26,7 +27,7 @@ from .windows_identity import apply_dark_titlebar
 
 BEAUTIFY_PRESETS = [
     {'id': 'aurora', 'name': '极光紫蓝', 'stops': ('#3b82f6', '#6366f1', '#a855f7')},
-    {'id': 'sunset', 'name': '日落珊瑚', 'stops': ('#f97316', '#ec4899', '#8b5cf6')},
+    {'id': 'sunset', 'name': '日落珊瑚', 'stops': ('#f97316', '#ec9b21', '#ec4899')},
     {'id': 'emerald', 'name': '翡翠极境', 'stops': ('#0f766e', '#0d9488', '#38bdf8')},
     {'id': 'obsidian', 'name': '深空星耀', 'stops': ('#0f172a', '#1e293b', '#334155')},
     {'id': 'rose', 'name': '玫瑰云雾', 'stops': ('#fb7185', '#f472b6', '#c084fc')},
@@ -40,6 +41,15 @@ _RATIOS = {
     '16:9': 16 / 9,
     '4:3': 4 / 3,
     '1:1': 1.0,
+}
+
+DEFAULT_BEAUTIFY_OPTIONS = {
+    'preset': 'aurora',
+    'padding': 56,
+    'radius': 14,
+    'shadow': 24,
+    'ratio': 'auto',
+    'window_chrome': False,
 }
 
 BEAUTIFY_QSS = """
@@ -85,18 +95,76 @@ def _preset_by_id(preset_id: str) -> dict:
     return BEAUTIFY_PRESETS[0]
 
 
+def normalize_beautify_options(raw: dict | None) -> dict:
+    cfg = dict(DEFAULT_BEAUTIFY_OPTIONS)
+    if not isinstance(raw, dict):
+        return cfg
+    valid_ids = {item['id'] for item in BEAUTIFY_PRESETS}
+    if raw.get('preset') in valid_ids:
+        cfg['preset'] = raw['preset']
+    if isinstance(raw.get('padding'), int) and 0 <= raw['padding'] <= 120:
+        cfg['padding'] = raw['padding']
+    if isinstance(raw.get('radius'), int) and 0 <= raw['radius'] <= 32:
+        cfg['radius'] = raw['radius']
+    if isinstance(raw.get('shadow'), int) and 0 <= raw['shadow'] <= 40:
+        cfg['shadow'] = raw['shadow']
+    if raw.get('ratio') in _RATIOS:
+        cfg['ratio'] = raw['ratio']
+    if isinstance(raw.get('window_chrome'), bool):
+        cfg['window_chrome'] = raw['window_chrome']
+    return cfg
+
+
+def load_beautify_prefs(home: Path | None) -> dict:
+    if home is None:
+        return dict(DEFAULT_BEAUTIFY_OPTIONS)
+    try:
+        path = Path(home) / 'beautify.json'
+        if path.is_file():
+            return normalize_beautify_options(json.loads(path.read_text(encoding='utf-8')))
+    except (OSError, ValueError):
+        pass
+    return dict(DEFAULT_BEAUTIFY_OPTIONS)
+
+
+def save_beautify_prefs(home: Path | None, options: dict) -> dict:
+    cfg = normalize_beautify_options(options)
+    if home is None:
+        return cfg
+    try:
+        path = Path(home) / 'beautify.json'
+        tmp = path.with_suffix('.tmp')
+        tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+        tmp.replace(path)
+    except OSError:
+        pass
+    return cfg
+
+
+def output_dimensions(image: QImage, options: dict | None = None) -> tuple[int, int]:
+    cfg = dict(DEFAULT_BEAUTIFY_OPTIONS)
+    if options:
+        cfg.update(options)
+    padding = max(0, min(160, int(cfg['padding'])))
+    chrome_h = 34 if cfg['window_chrome'] else 0
+    card_w = image.width()
+    card_h = image.height() + chrome_h
+    outer_w = card_w + padding * 2
+    outer_h = card_h + padding * 2
+    target_ratio = _RATIOS.get(cfg['ratio'])
+    if target_ratio:
+        if outer_w / max(1, outer_h) < target_ratio:
+            outer_w = math.ceil(outer_h * target_ratio)
+        else:
+            outer_h = math.ceil(outer_w / target_ratio)
+    return max(1, outer_w), max(1, outer_h)
+
+
 def render_beautified(image: QImage, options: dict | None = None) -> QImage:
     """Render screenshot with gradient background, rounded card, shadow, and optional macOS chrome."""
     if image.isNull():
         raise ValueError('图片内容为空')
-    cfg = {
-        'preset': 'aurora',
-        'padding': 56,
-        'radius': 14,
-        'shadow': 24,
-        'ratio': 'auto',
-        'window_chrome': False,
-    }
+    cfg = dict(DEFAULT_BEAUTIFY_OPTIONS)
     if options:
         cfg.update(options)
 
@@ -111,16 +179,9 @@ def render_beautified(image: QImage, options: dict | None = None) -> QImage:
     card_w = src.width()
     card_h = src.height() + chrome_h
 
-    outer_w = card_w + padding * 2
-    outer_h = card_h + padding * 2
-    target_ratio = _RATIOS.get(cfg['ratio'])
-    if target_ratio:
-        if outer_w / max(1, outer_h) < target_ratio:
-            outer_w = math.ceil(outer_h * target_ratio)
-        else:
-            outer_h = math.ceil(outer_w / target_ratio)
+    outer_w, outer_h = output_dimensions(src, cfg)
 
-    out = QImage(max(1, outer_w), max(1, outer_h), QImage.Format.Format_ARGB32)
+    out = QImage(outer_w, outer_h, QImage.Format.Format_ARGB32)
     out.setDevicePixelRatio(1)
     out.fill(Qt.GlobalColor.transparent)
 
@@ -248,7 +309,6 @@ class BeautifyPreview(QWidget):
         dh = self.image.height() * scale
         target = QRectF(avail.center().x() - dw / 2, avail.center().y() - dh / 2, dw, dh)
 
-        # Subtle checkerboard behind transparent canvas
         clip = QPainterPath()
         clip.addRoundedRect(target, 6, 6)
         p.save()
@@ -265,21 +325,31 @@ class BeautifyPreview(QWidget):
 
 
 class BeautifyDialog(QDialog):
-    """Live CleanShot-style screenshot beautifier dialog."""
+    """Live CleanShot-style screenshot beautifier dialog with preference memory & proxy slider preview."""
 
     def __init__(self, image: QImage, controller=None, parent=None):
         super().__init__(parent)
         self.source_image = image.copy()
         self.controller = controller
+        self._home = getattr(getattr(controller, 'window', None), 'home', None)
+        self.options = load_beautify_prefs(self._home)
         self.rendered_image = self.source_image
-        self.options = {
-            'preset': 'aurora',
-            'padding': 56,
-            'radius': 14,
-            'shadow': 24,
-            'ratio': 'auto',
-            'window_chrome': False,
-        }
+        self._rendered_dirty = True
+        self._dragging_slider = False
+
+        # Downscaled proxy for 60fps smooth slider dragging on large/long screenshots
+        max_dim = max(self.source_image.width(), self.source_image.height())
+        if max_dim > 960:
+            self._proxy_scale = 960.0 / max_dim
+            self._proxy_image = self.source_image.scaled(
+                max(1, round(self.source_image.width() * self._proxy_scale)),
+                max(1, round(self.source_image.height() * self._proxy_scale)),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        else:
+            self._proxy_scale = 1.0
+            self._proxy_image = self.source_image
 
         self.setWindowTitle('美化套壳 · SnapFlow')
         self.resize(980, 640)
@@ -324,7 +394,7 @@ class BeautifyDialog(QDialog):
         self.preset_buttons = {}
         for idx, preset in enumerate(BEAUTIFY_PRESETS):
             btn = PresetSwatch(preset)
-            btn.setChecked(preset['id'] == 'aurora')
+            btn.setChecked(preset['id'] == self.options['preset'])
             btn.clicked.connect(lambda _=False, pid=preset['id']: self._set_option('preset', pid))
             self.preset_group.addButton(btn)
             self.preset_buttons[preset['id']] = btn
@@ -332,11 +402,12 @@ class BeautifyDialog(QDialog):
         p_layout.addLayout(grid)
 
         self.sliders = {}
-        for key, label, minimum, maximum, initial in (
-            ('padding', '内边距', 0, 120, 56),
-            ('radius', '圆角', 0, 32, 14),
-            ('shadow', '阴影强度', 0, 40, 24),
+        for key, label, minimum, maximum in (
+            ('padding', '内边距', 0, 120),
+            ('radius', '圆角', 0, 32),
+            ('shadow', '阴影强度', 0, 40),
         ):
+            initial = int(self.options[key])
             row = QHBoxLayout()
             lbl = QLabel(label)
             lbl.setObjectName('panelSection')
@@ -350,8 +421,13 @@ class BeautifyDialog(QDialog):
             slider = QSlider(Qt.Orientation.Horizontal)
             slider.setRange(minimum, maximum)
             slider.setValue(initial)
+            slider.sliderPressed.connect(self._on_slider_pressed)
+            slider.sliderReleased.connect(self._on_slider_released)
             slider.valueChanged.connect(
-                lambda v, k=key, tag=val: (tag.setText(f'{v} px' if k != 'shadow' else f'{v}'), self._set_option(k, v))
+                lambda v, k=key, tag=val: (
+                    tag.setText(f'{v} px' if k != 'shadow' else f'{v}'),
+                    self._set_option(k, v, fast=self._dragging_slider),
+                )
             )
             p_layout.addWidget(slider)
             self.sliders[key] = slider
@@ -368,7 +444,7 @@ class BeautifyDialog(QDialog):
             btn = QPushButton(r_label)
             btn.setObjectName('ratioPill')
             btn.setCheckable(True)
-            btn.setChecked(r_key == 'auto')
+            btn.setChecked(r_key == self.options['ratio'])
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda _=False, rk=r_key: self._set_option('ratio', rk))
             self.ratio_group.addButton(btn)
@@ -377,14 +453,26 @@ class BeautifyDialog(QDialog):
         p_layout.addLayout(ratio_row)
 
         self.chrome_check = QCheckBox('显示窗口顶栏（红黄绿圆点）')
+        self.chrome_check.setChecked(bool(self.options['window_chrome']))
         self.chrome_check.toggled.connect(lambda checked: self._set_option('window_chrome', checked))
         p_layout.addWidget(self.chrome_check)
 
         p_layout.addStretch(1)
 
-        copy_btn = QPushButton('复制到剪贴板')
+        copy_btn = QPushButton('复制到剪贴板 (Enter)')
         copy_btn.setObjectName('primaryAction')
         copy_btn.setIcon(line_icon('copy', '#0b101b'))
+        copy_btn.setDefault(True)
+        save_hist = (
+            controller.settings.get('save_copy_history', True)
+            if controller and isinstance(getattr(controller, 'settings', None), dict)
+            else False
+        )
+        copy_btn.setToolTip(
+            '复制到剪贴板，并在本机剪贴历史暂存最近 20 张（可在设置中关闭）'
+            if save_hist
+            else '仅复制到剪贴板，不写入磁盘文件'
+        )
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         copy_btn.clicked.connect(self.copy_result)
         p_layout.addWidget(copy_btn)
@@ -394,11 +482,13 @@ class BeautifyDialog(QDialog):
         pin_btn = QPushButton('贴到屏幕')
         pin_btn.setObjectName('secondaryAction')
         pin_btn.setIcon(line_icon('pin', '#e4eef8'))
+        pin_btn.setAutoDefault(False)
         pin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         pin_btn.clicked.connect(self.pin_result)
 
         save_btn = QPushButton('保存 PNG')
         save_btn.setObjectName('secondaryAction')
+        save_btn.setAutoDefault(False)
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.clicked.connect(self.save_result)
 
@@ -407,35 +497,74 @@ class BeautifyDialog(QDialog):
         p_layout.addLayout(action_row)
 
         root.addWidget(panel)
-        self.refresh_preview()
 
-    def _set_option(self, key: str, value):
+        for seq, fn in (('Ctrl+C', self.copy_result), ('Ctrl+S', self.save_result), ('Ctrl+P', self.pin_result)):
+            sc = QShortcut(QKeySequence(seq), self)
+            sc.activated.connect(fn)
+
+        self.refresh_preview(full_res=True)
+
+    def _on_slider_pressed(self):
+        self._dragging_slider = True
+
+    def _on_slider_released(self):
+        self._dragging_slider = False
+        save_beautify_prefs(self._home, self.options)
+        self.refresh_preview(full_res=True)
+
+    def _set_option(self, key: str, value, *, fast: bool = False):
         self.options[key] = value
-        self.refresh_preview()
+        self._rendered_dirty = True
+        if not fast:
+            save_beautify_prefs(self._home, self.options)
+        self.refresh_preview(full_res=not fast)
 
-    def refresh_preview(self):
-        self.rendered_image = render_beautified(self.source_image, self.options)
-        self.preview.set_image(self.rendered_image)
-        self.dim_label.setText(f'输出尺寸：{self.rendered_image.width()} × {self.rendered_image.height()} px')
+    def _ensure_full_res(self):
+        if self._rendered_dirty:
+            self.rendered_image = render_beautified(self.source_image, self.options)
+            self._rendered_dirty = False
+        return self.rendered_image
+
+    def refresh_preview(self, full_res: bool = True):
+        out_w, out_h = output_dimensions(self.source_image, self.options)
+        self.dim_label.setText(f'输出尺寸：{out_w} × {out_h} px')
+        if full_res or self._proxy_scale >= 0.99:
+            self.rendered_image = render_beautified(self.source_image, self.options)
+            self._rendered_dirty = False
+            self.preview.set_image(self.rendered_image)
+        else:
+            scaled_opts = dict(self.options)
+            scaled_opts['padding'] = round(self.options['padding'] * self._proxy_scale)
+            scaled_opts['radius'] = round(self.options['radius'] * self._proxy_scale)
+            scaled_opts['shadow'] = round(self.options['shadow'] * self._proxy_scale)
+            proxy_out = render_beautified(self._proxy_image, scaled_opts)
+            self.preview.set_image(proxy_out)
 
     def copy_result(self):
+        img = self._ensure_full_res()
         try:
             from .screen_capture import copy_image
-
-            copy_image(self.rendered_image)
+            copy_image(img)
         except Exception as exc:
             self.error_label.setText('复制失败：' + str(exc))
             return
+        if self.controller and hasattr(self.controller, 'record_copy_history'):
+            recorded = self.controller.record_copy_history(img)
+        else:
+            recorded = False
         if self.controller and hasattr(self.controller, 'notify'):
-            self.controller.notify('美化截图已复制', '可直接粘贴到聊天窗口或文档')
+            hint = '已同步暂存至本机剪贴历史（可在设置关闭）' if recorded else '未写入磁盘文件'
+            self.controller.notify('美化截图已复制', hint)
         self.accept()
 
     def pin_result(self):
+        img = self._ensure_full_res()
         if self.controller and hasattr(self.controller, 'pin_image'):
-            self.controller.pin_image(self.rendered_image)
+            self.controller.pin_image(img)
         self.accept()
 
     def save_result(self):
+        img = self._ensure_full_res()
         try:
             from .screen_capture import copy_image, save_png
 
@@ -444,7 +573,7 @@ class BeautifyDialog(QDialog):
                 if self.controller and hasattr(self.controller, 'settings')
                 else Path.home() / 'Desktop'
             )
-            path = save_png(self.rendered_image, directory)
+            path = save_png(img, directory)
             if self.controller:
                 self.controller.last_saved = path
                 if hasattr(self.controller, '_notify_window_refresh'):
@@ -453,9 +582,9 @@ class BeautifyDialog(QDialog):
             self.error_label.setText('保存失败：' + str(exc))
             return
         try:
-            copy_image(self.rendered_image)
+            copy_image(img)
         except Exception:
             pass
         if self.controller and hasattr(self.controller, 'notify'):
-            self.controller.notify('美化截图已保存', str(path))
+            self.controller.notify('美化截图已保存', path.name)
         self.accept()
